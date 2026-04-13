@@ -9,6 +9,8 @@ const INVOICES_STORE = "invoices";
 const USERS_STORE = "users";
 const ITEMS_STORE = "items";
 const META_STORE = "meta";
+const SUPABASE_CONFIG = window.APP_CONFIG || {};
+const supabaseClient = initializeSupabase();
 const DEFAULT_USER = {
   userId: "admin",
   password: "golu123",
@@ -16,19 +18,19 @@ const DEFAULT_USER = {
   name: "Administrator"
 };
 
-const SETTINGS = {
-  businessName: "AWANSHI ENTERPRISES",
-  businessEmail: "eawanshi@gmail.com",
-  businessPhone: "9026443176, 7985253134",
-  businessGst: "09GNKPM2232K1ZN",
-  address: "Jabrauli, Mohanlalganj, Lucknow, Uttar Pradesh - 226301",
+const DEFAULT_BUSINESS_PROFILE = {
+  businessName: "",
+  businessEmail: "",
+  businessPhone: "",
+  businessGst: "",
+  address: "",
+  bankName: "",
+  accountHolder: "",
+  accountNumber: "",
+  ifscCode: "",
+  upiId: "",
   defaultGst: 18,
-  bankNotes: [
-    "Payment via:",
-    "Bank of Baroda | A/C: 35090200000586 | IFSC: BARB0MOHANL | Branch: Mohanlalganj, Lucknow",
-    "Account Name: AWANSHI ENTERPRISES",
-    "Thank you for your business!"
-  ].join("\n")
+  bankNotes: ""
 };
 
 const state = {
@@ -37,25 +39,39 @@ const state = {
   currentUser: loadSession(),
   users: [],
   items: [],
-  pendingReset: null,
+  businessProfile: { ...DEFAULT_BUSINESS_PROFILE },
   nextInvoiceCounter: 1,
   proformaCounter: 1,
   db: null,
-  appReady: false
+  appReady: false,
+  authSubscription: null
 };
 
 const elements = {
   loginScreen: document.getElementById("loginScreen"),
+  authTabs: [...document.querySelectorAll(".auth-tab")],
+  authPanels: [...document.querySelectorAll("[data-auth-view-panel]")],
   loginForm: document.getElementById("loginForm"),
+  signupForm: document.getElementById("signupForm"),
   loginError: document.getElementById("loginError"),
   passwordResetForm: document.getElementById("passwordResetForm"),
-  passwordResetMessage: document.getElementById("passwordResetMessage"),
-  sendOtpButton: document.getElementById("sendOtpButton"),
+  authHint: document.getElementById("authHint"),
+  authMessage: document.getElementById("authMessage"),
   appShell: document.getElementById("appShell"),
   logoutButton: document.getElementById("logoutButton"),
   currentUserLabel: document.getElementById("currentUserLabel"),
+  heroBusinessName: document.getElementById("heroBusinessName"),
+  heroBusinessCopy: document.getElementById("heroBusinessCopy"),
+  heroBusinessGst: document.getElementById("heroBusinessGst"),
+  heroBusinessAddress: document.getElementById("heroBusinessAddress"),
+  heroBusinessEmail: document.getElementById("heroBusinessEmail"),
+  heroBusinessPhone: document.getElementById("heroBusinessPhone"),
   tabs: [...document.querySelectorAll(".tab-button")],
   panels: [...document.querySelectorAll(".tab-panel")],
+  companyProfileForm: document.getElementById("companyProfileForm"),
+  resetCompanyProfileForm: document.getElementById("resetCompanyProfileForm"),
+  companyProfileMessage: document.getElementById("companyProfileMessage"),
+  companyProfileSummary: document.getElementById("companyProfileSummary"),
   form: document.getElementById("invoiceForm"),
   itemStoreForm: document.getElementById("itemStoreForm"),
   resetItemStoreForm: document.getElementById("resetItemStoreForm"),
@@ -90,6 +106,31 @@ const elements = {
 
 initializeApp();
 
+function initializeSupabase() {
+  const supabaseUrl = SUPABASE_CONFIG.supabaseUrl;
+  const supabaseAnonKey = SUPABASE_CONFIG.supabaseAnonKey;
+
+  if (!supabaseUrl || !supabaseAnonKey || !window.supabase?.createClient) {
+    console.info("Supabase is not configured. Using local IndexedDB storage.");
+    return null;
+  }
+
+  try {
+    const client = window.supabase.createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true
+      }
+    });
+    console.info("Supabase client initialized.");
+    return client;
+  } catch (error) {
+    console.error("Failed to initialize Supabase client.", error);
+    return null;
+  }
+}
+
 async function initializeApp() {
   state.db = await openDatabase();
   await migrateLegacyData();
@@ -100,6 +141,7 @@ async function initializeApp() {
   state.proformaCounter = await getMetaValue("proformaCounter", 1);
 
   bindAuthActions();
+  await initializeSupabaseAuth();
   updateSessionLabel();
   if (state.currentUser) {
     showApp();
@@ -111,6 +153,7 @@ async function initializeApp() {
 
 function initializeBillingApp() {
   if (state.appReady) {
+    renderCompanyProfile();
     renderDashboard();
     renderItemStore();
     renderInvoicesTable();
@@ -119,10 +162,13 @@ function initializeBillingApp() {
   }
 
   bindTabNavigation();
+  bindCompanyProfileActions();
   bindFormActions();
   bindItemStoreActions();
   bindBackupActions();
+  resetCompanyProfileForm();
   resetForm();
+  renderCompanyProfile();
   renderDashboard();
   renderItemStore();
   renderInvoicesTable();
@@ -131,148 +177,252 @@ function initializeBillingApp() {
 }
 
 function bindAuthActions() {
+  bindAuthTabs();
   elements.loginForm.addEventListener("submit", handleLogin);
-  elements.sendOtpButton.addEventListener("click", handleSendOtp);
+  elements.signupForm.addEventListener("submit", handleSignup);
   elements.passwordResetForm.addEventListener("submit", handlePasswordReset);
   elements.logoutButton.addEventListener("click", handleLogout);
 }
 
-function handleLogin(event) {
-  event.preventDefault();
-  const userId = elements.loginForm.elements.userId.value.trim();
-  const password = elements.loginForm.elements.password.value;
-  const user = state.users.find((entry) => entry.userId === userId && entry.password === password);
-
-  if (user) {
-    state.currentUser = {
-      userId: user.userId,
-      name: user.name,
-      email: user.email
-    };
-    saveSession(state.currentUser);
-    elements.loginError.textContent = "";
-    elements.passwordResetMessage.textContent = "";
-    elements.loginForm.reset();
-    updateSessionLabel();
-    showApp();
-    initializeBillingApp();
-    return;
-  }
-
-  elements.loginError.textContent = "Invalid user ID or password.";
+function bindAuthTabs() {
+  elements.authTabs.forEach((button) => {
+    button.addEventListener("click", () => setAuthView(button.dataset.authView));
+  });
 }
 
-function handleSendOtp() {
-  const email = elements.passwordResetForm.elements.email.value.trim().toLowerCase();
-  if (!email) {
-    elements.passwordResetMessage.innerHTML = "Enter your registered email ID first.";
+async function initializeSupabaseAuth() {
+  if (!supabaseClient) {
+    elements.authHint.textContent = "Supabase is not configured. The app will fall back to local login data only.";
     return;
   }
 
-  const user = state.users.find((entry) => entry.email.toLowerCase() === email);
+  const { data, error } = await supabaseClient.auth.getSession();
+  if (error) {
+    console.error("Failed to restore Supabase session.", error);
+  }
+
+  if (data?.session?.user) {
+    await applyAuthenticatedUser(data.session.user);
+  } else {
+    state.currentUser = null;
+    clearSession();
+  }
+
+  state.authSubscription = supabaseClient.auth.onAuthStateChange(async (eventName, session) => {
+    if (session?.user) {
+      await applyAuthenticatedUser(session.user);
+      return;
+    }
+
+    if (eventName === "SIGNED_OUT") {
+      state.currentUser = null;
+      clearSession();
+      updateSessionLabel();
+      showLogin();
+      setAuthView("login");
+    }
+  });
+}
+
+function setAuthView(viewName) {
+  elements.authTabs.forEach((button) => {
+    button.classList.toggle("active", button.dataset.authView === viewName);
+  });
+  elements.authPanels.forEach((panel) => {
+    panel.classList.toggle("active", panel.dataset.authViewPanel === viewName);
+  });
+  clearAuthMessages();
+}
+
+async function handleLogin(event) {
+  event.preventDefault();
+  const email = elements.loginForm.elements.email.value.trim().toLowerCase();
+  const password = elements.loginForm.elements.password.value;
+  clearAuthMessages();
+
+  if (supabaseClient) {
+    const { data, error } = await supabaseClient.auth.signInWithPassword({
+      email,
+      password
+    });
+
+    if (error) {
+      elements.loginError.textContent = error.message || "Unable to sign in.";
+      return;
+    }
+
+    if (data?.user) {
+      elements.loginForm.reset();
+    }
+    return;
+  }
+
+  const user = state.users.find((entry) => entry.email?.toLowerCase() === email && entry.password === password);
   if (!user) {
-    state.pendingReset = null;
-    elements.passwordResetMessage.innerHTML = "No user found with this email ID.";
+    elements.loginError.textContent = "Invalid email or password.";
     return;
   }
 
-  const otp = generateOtp();
-  state.pendingReset = {
+  state.currentUser = {
+    userId: user.userId,
+    name: user.name,
+    email: user.email
+  };
+  saveSession(state.currentUser);
+  elements.loginForm.reset();
+  updateSessionLabel();
+  showApp();
+  initializeBillingApp();
+}
+
+async function handleSignup(event) {
+  event.preventDefault();
+  clearAuthMessages();
+
+  if (!supabaseClient) {
+    elements.loginError.textContent = "Supabase is not configured yet. Add your project URL and anon key first.";
+    return;
+  }
+
+  const name = elements.signupForm.elements.name.value.trim();
+  const userId = elements.signupForm.elements.userId.value.trim();
+  const companyName = elements.signupForm.elements.companyName.value.trim();
+  const businessGst = elements.signupForm.elements.businessGst.value.trim();
+  const businessPhone = elements.signupForm.elements.businessPhone.value.trim();
+  const businessAddress = elements.signupForm.elements.businessAddress.value.trim();
+  const bankNotes = elements.signupForm.elements.bankNotes.value.trim();
+  const email = elements.signupForm.elements.email.value.trim().toLowerCase();
+  const password = elements.signupForm.elements.password.value;
+  const confirmPassword = elements.signupForm.elements.confirmPassword.value;
+
+  if (password.length < 6) {
+    elements.loginError.textContent = "Password must be at least 6 characters.";
+    return;
+  }
+
+  if (password !== confirmPassword) {
+    elements.loginError.textContent = "Password and confirm password do not match.";
+    return;
+  }
+
+  const signUpOptions = {
     email,
-    otp,
-    expiresAt: Date.now() + (5 * 60 * 1000)
+    password,
+    options: {
+      data: {
+        name,
+        user_id: userId,
+        company_name: companyName,
+        business_gst: businessGst,
+        business_phone: businessPhone,
+        business_address: businessAddress,
+        bank_notes: bankNotes
+      }
+    }
   };
 
-  elements.passwordResetMessage.innerHTML = `OTP generated for <strong>${escapeHtml(user.email)}</strong>. Demo OTP: <strong>${otp}</strong>. It is valid for 5 minutes.`;
+  const redirectUrl = buildAuthRedirectUrl();
+  if (redirectUrl) {
+    signUpOptions.options.emailRedirectTo = redirectUrl;
+  }
+
+  const { data, error } = await supabaseClient.auth.signUp(signUpOptions);
+  if (error) {
+    elements.loginError.textContent = error.message || "Unable to create account.";
+    return;
+  }
+
+  if (data?.user) {
+    state.businessProfile = normalizeBusinessProfile({
+      ...state.businessProfile,
+      businessName: companyName,
+      businessGst,
+      businessPhone,
+      address: businessAddress,
+      businessEmail: email,
+      bankNotes
+    });
+    await syncUserProfile(data.user);
+  }
+
+  setAuthView("login");
+  elements.signupForm.reset();
+  elements.authMessage.textContent = `Signup successful for ${email}. Check your email and click the confirmation link, then come back here to log in.`;
 }
 
 async function handlePasswordReset(event) {
   event.preventDefault();
+  clearAuthMessages();
+
+  if (!supabaseClient) {
+    elements.loginError.textContent = "Supabase is not configured yet. Password reset email requires Supabase auth.";
+    return;
+  }
+
   const email = elements.passwordResetForm.elements.email.value.trim().toLowerCase();
-  const otp = elements.passwordResetForm.elements.otp.value.trim();
-  const newPassword = elements.passwordResetForm.elements.newPassword.value;
-  const confirmPassword = elements.passwordResetForm.elements.confirmPassword.value;
+  const options = {};
+  const redirectUrl = buildAuthRedirectUrl();
+  if (redirectUrl) {
+    options.redirectTo = redirectUrl;
+  }
 
-  if (!state.pendingReset || state.pendingReset.email !== email) {
-    elements.passwordResetMessage.innerHTML = "Send OTP first for this email ID.";
+  const { error } = await supabaseClient.auth.resetPasswordForEmail(email, options);
+  if (error) {
+    elements.loginError.textContent = error.message || "Unable to send reset email.";
     return;
   }
 
-  if (Date.now() > state.pendingReset.expiresAt) {
-    state.pendingReset = null;
-    elements.passwordResetMessage.innerHTML = "OTP expired. Please send a new OTP.";
-    return;
-  }
-
-  if (otp !== state.pendingReset.otp) {
-    elements.passwordResetMessage.innerHTML = "Invalid OTP. Please check and try again.";
-    return;
-  }
-
-  if (newPassword.length < 4) {
-    elements.passwordResetMessage.innerHTML = "New password must be at least 4 characters.";
-    return;
-  }
-
-  if (newPassword !== confirmPassword) {
-    elements.passwordResetMessage.innerHTML = "New password and confirm password do not match.";
-    return;
-  }
-
-  const userIndex = state.users.findIndex((entry) => entry.email.toLowerCase() === email);
-  state.users[userIndex] = {
-    ...state.users[userIndex],
-    password: newPassword
-  };
-  await saveUsers();
-  state.pendingReset = null;
   elements.passwordResetForm.reset();
-  elements.loginError.textContent = "";
-  elements.passwordResetMessage.innerHTML = `Password updated for <strong>${escapeHtml(state.users[userIndex].userId)}</strong>. Use the new password to login.`;
+  elements.authMessage.textContent = `Password reset email sent to ${email}. Open the link from your inbox to continue.`;
 }
 
 async function handleSaveItem(event) {
   event.preventDefault();
-  const form = elements.itemStoreForm;
-  const itemId = form.elements.itemId.value;
-  const name = form.elements.name.value.trim();
-  const hsnCode = form.elements.hsnCode.value.trim();
-  const rate = readNumber(form.elements.rate.value);
-  const stockQty = readNumber(form.elements.stockQty.value);
+  try {
+    const form = elements.itemStoreForm;
+    const itemId = form.elements.itemId.value;
+    const name = form.elements.name.value.trim();
+    const hsnCode = form.elements.hsnCode.value.trim();
+    const rate = readNumber(form.elements.rate.value);
+    const stockQty = readNumber(form.elements.stockQty.value);
 
-  if (!name) {
-    window.alert("Enter item name.");
-    return;
+    if (!name) {
+      window.alert("Enter item name.");
+      return;
+    }
+
+    const duplicateItem = state.items.find((item) =>
+      item.id !== itemId && item.name.trim().toLowerCase() === name.toLowerCase()
+    );
+    if (duplicateItem) {
+      window.alert("An item with this name already exists.");
+      return;
+    }
+
+    const record = normalizeItemRecord({
+      id: itemId || (crypto.randomUUID ? crypto.randomUUID() : `item-${Date.now()}`),
+      name,
+      hsnCode,
+      rate,
+      stockQty
+    });
+
+    if (itemId) {
+      state.items = state.items.map((item) => item.id === itemId ? record : item);
+    } else {
+      state.items.unshift(record);
+    }
+
+    await saveItems();
+    resetItemStoreForm();
+    renderItemStore();
+    renderDashboard();
+    renderInvoicesTable();
+    updateTotals();
+  } catch (error) {
+    console.error("Failed to save item.", error);
+    window.alert(`Failed to save item. ${error.message || "Please try again."}`);
   }
-
-  const duplicateItem = state.items.find((item) =>
-    item.id !== itemId && item.name.trim().toLowerCase() === name.toLowerCase()
-  );
-  if (duplicateItem) {
-    window.alert("An item with this name already exists.");
-    return;
-  }
-
-  const record = {
-    id: itemId || (crypto.randomUUID ? crypto.randomUUID() : `item-${Date.now()}`),
-    name,
-    hsnCode,
-    rate,
-    stockQty
-  };
-
-  if (itemId) {
-    state.items = state.items.map((item) => item.id === itemId ? record : item);
-  } else {
-    state.items.unshift(record);
-  }
-
-  await saveItems();
-  resetItemStoreForm();
-  renderItemStore();
-  renderDashboard();
-  renderInvoicesTable();
-  updateTotals();
 }
 
 function handleExportBackup() {
@@ -306,20 +456,23 @@ async function handleImportBackup(event) {
       return;
     }
 
-    state.invoices = backup.invoices;
-    state.users = backup.users.length ? backup.users : [DEFAULT_USER];
-    state.items = backup.items;
+    state.invoices = backup.invoices.map(normalizeInvoiceRecord);
+    state.users = canUseSupabaseStorage() ? buildUserState() : (backup.users.length ? backup.users : [DEFAULT_USER]);
+    state.items = backup.items.map(normalizeItemRecord);
+    state.businessProfile = backup.businessProfile;
     state.nextInvoiceCounter = backup.meta.invoiceCounter;
     state.proformaCounter = backup.meta.proformaCounter;
 
     await saveInvoices();
     await saveUsers();
     await saveItems();
-    await setMetaValue("invoiceCounter", state.nextInvoiceCounter);
-    await setMetaValue("proformaCounter", state.proformaCounter);
+    await saveBusinessProfile();
+    await saveUserCounters();
 
     resetItemStoreForm();
+    resetCompanyProfileForm();
     resetForm();
+    renderCompanyProfile();
     renderDashboard();
     renderItemStore();
     renderInvoicesTable();
@@ -367,22 +520,36 @@ async function handleItemStoreTableClick(event) {
       return;
     }
 
-    state.items = state.items.filter((entry) => entry.id !== item.id);
-    await saveItems();
-    resetItemStoreForm();
-    renderItemStore();
-    renderDashboard();
-    updateTotals();
+    try {
+      state.items = state.items.filter((entry) => entry.id !== item.id);
+      await saveItems();
+      resetItemStoreForm();
+      renderItemStore();
+      renderDashboard();
+      updateTotals();
+    } catch (error) {
+      console.error("Failed to delete item.", error);
+      window.alert(`Failed to delete item. ${error.message || "Please try again."}`);
+    }
   }
 }
 
-function handleLogout() {
+async function handleLogout() {
+  clearAuthMessages();
+
+  if (supabaseClient) {
+    const { error } = await supabaseClient.auth.signOut();
+    if (error) {
+      elements.loginError.textContent = error.message || "Unable to sign out.";
+      return;
+    }
+  }
+
   state.currentUser = null;
   clearSession();
   updateSessionLabel();
   showLogin();
-  elements.loginError.textContent = "";
-  elements.passwordResetMessage.textContent = "";
+  setAuthView("login");
 }
 
 function showLogin() {
@@ -397,7 +564,7 @@ function showApp() {
 
 function updateSessionLabel() {
   const label = state.currentUser
-    ? `Signed in as ${state.currentUser.userId}`
+    ? `Signed in as ${state.currentUser.userId || state.currentUser.email}`
     : "Signed out";
   elements.currentUserLabel.textContent = label;
 }
@@ -406,6 +573,11 @@ function bindTabNavigation() {
   elements.tabs.forEach((button) => {
     button.addEventListener("click", () => switchTab(button.dataset.tab));
   });
+}
+
+function bindCompanyProfileActions() {
+  elements.companyProfileForm.addEventListener("submit", handleSaveCompanyProfile);
+  elements.resetCompanyProfileForm.addEventListener("click", resetCompanyProfileForm);
 }
 
 function switchTab(targetId) {
@@ -484,11 +656,110 @@ function resetForm() {
   elements.form.elements.invoiceNumber.value = getNextDocumentNumber("Bill");
   elements.form.elements.invoiceDate.value = todayString();
   elements.form.elements.dueDate.value = todayString(7);
-  elements.form.elements.gstPercent.value = SETTINGS.defaultGst;
+  elements.form.elements.gstPercent.value = state.businessProfile.defaultGst;
   elements.form.elements.discountPercent.value = 0;
   elements.form.elements.status.value = "Pending";
-  elements.notesField.value = SETTINGS.bankNotes;
+  elements.notesField.value = state.businessProfile.bankNotes;
   updateTotals();
+}
+
+function resetCompanyProfileForm() {
+  elements.companyProfileForm.reset();
+  elements.companyProfileForm.elements.businessName.value = state.businessProfile.businessName || "";
+  elements.companyProfileForm.elements.businessGst.value = state.businessProfile.businessGst || "";
+  elements.companyProfileForm.elements.businessEmail.value = state.businessProfile.businessEmail || "";
+  elements.companyProfileForm.elements.businessPhone.value = state.businessProfile.businessPhone || "";
+  elements.companyProfileForm.elements.businessAddress.value = state.businessProfile.address || "";
+  elements.companyProfileForm.elements.bankName.value = state.businessProfile.bankName || "";
+  elements.companyProfileForm.elements.accountHolder.value = state.businessProfile.accountHolder || "";
+  elements.companyProfileForm.elements.accountNumber.value = state.businessProfile.accountNumber || "";
+  elements.companyProfileForm.elements.ifscCode.value = state.businessProfile.ifscCode || "";
+  elements.companyProfileForm.elements.upiId.value = state.businessProfile.upiId || "";
+  elements.companyProfileForm.elements.bankNotes.value = state.businessProfile.bankNotes || "";
+}
+
+function normalizeBusinessProfile(profile = {}) {
+  return {
+    businessName: String(profile.businessName || "").trim(),
+    businessEmail: String(profile.businessEmail || "").trim(),
+    businessPhone: String(profile.businessPhone || "").trim(),
+    businessGst: String(profile.businessGst || "").trim(),
+    address: String(profile.address || "").trim(),
+    bankName: String(profile.bankName || "").trim(),
+    accountHolder: String(profile.accountHolder || "").trim(),
+    accountNumber: String(profile.accountNumber || "").trim(),
+    ifscCode: String(profile.ifscCode || "").trim(),
+    upiId: String(profile.upiId || "").trim(),
+    defaultGst: readNumber(profile.defaultGst || DEFAULT_BUSINESS_PROFILE.defaultGst) || DEFAULT_BUSINESS_PROFILE.defaultGst,
+    bankNotes: String(profile.bankNotes || "").trim()
+  };
+}
+
+function renderCompanyProfile() {
+  const profile = state.businessProfile;
+  elements.heroBusinessName.textContent = profile.businessName || "Your Company Workspace";
+  elements.heroBusinessCopy.textContent = profile.businessName
+    ? `Create, manage, preview, and print professional tax invoices for ${profile.businessName} with your own business details.`
+    : "Create, manage, preview, and print professional tax invoices with your own business and bank details.";
+  elements.heroBusinessGst.textContent = `GSTIN: ${profile.businessGst || "Not added yet"}`;
+  elements.heroBusinessAddress.textContent = profile.address || "Add your company address from the Company tab.";
+  elements.heroBusinessEmail.textContent = `Email: ${profile.businessEmail || "Not added yet"}`;
+  elements.heroBusinessPhone.textContent = `Phone: ${profile.businessPhone || "Not added yet"}`;
+  elements.companyProfileSummary.innerHTML = `
+    <table>
+      <tbody>
+        <tr><th>Company</th><td>${escapeHtml(profile.businessName || "Not added yet")}</td></tr>
+        <tr><th>GSTIN</th><td>${escapeHtml(profile.businessGst || "Not added yet")}</td></tr>
+        <tr><th>Email</th><td>${escapeHtml(profile.businessEmail || "Not added yet")}</td></tr>
+        <tr><th>Phone</th><td>${escapeHtml(profile.businessPhone || "Not added yet")}</td></tr>
+        <tr><th>Address</th><td>${escapeHtml(profile.address || "Not added yet")}</td></tr>
+        <tr><th>Bank Name</th><td>${escapeHtml(profile.bankName || "Not added yet")}</td></tr>
+        <tr><th>Account Holder</th><td>${escapeHtml(profile.accountHolder || "Not added yet")}</td></tr>
+        <tr><th>Account Number</th><td>${escapeHtml(profile.accountNumber || "Not added yet")}</td></tr>
+        <tr><th>IFSC</th><td>${escapeHtml(profile.ifscCode || "Not added yet")}</td></tr>
+        <tr><th>UPI ID</th><td>${escapeHtml(profile.upiId || "Not added yet")}</td></tr>
+        <tr><th>Bank Notes</th><td>${escapeHtml(profile.bankNotes || "Not added yet")}</td></tr>
+      </tbody>
+    </table>
+  `;
+  resetCompanyProfileForm();
+}
+
+async function handleSaveCompanyProfile(event) {
+  event.preventDefault();
+  elements.companyProfileMessage.textContent = "";
+
+  const profile = normalizeBusinessProfile({
+    businessName: elements.companyProfileForm.elements.businessName.value,
+    businessGst: elements.companyProfileForm.elements.businessGst.value,
+    businessEmail: elements.companyProfileForm.elements.businessEmail.value,
+    businessPhone: elements.companyProfileForm.elements.businessPhone.value,
+    address: elements.companyProfileForm.elements.businessAddress.value,
+    bankName: elements.companyProfileForm.elements.bankName.value,
+    accountHolder: elements.companyProfileForm.elements.accountHolder.value,
+    accountNumber: elements.companyProfileForm.elements.accountNumber.value,
+    ifscCode: elements.companyProfileForm.elements.ifscCode.value,
+    upiId: elements.companyProfileForm.elements.upiId.value,
+    bankNotes: elements.companyProfileForm.elements.bankNotes.value,
+    defaultGst: state.businessProfile.defaultGst
+  });
+
+  if (!profile.businessName) {
+    elements.companyProfileMessage.textContent = "Company name is required.";
+    return;
+  }
+
+  try {
+    state.businessProfile = profile;
+    await saveBusinessProfile();
+    renderCompanyProfile();
+    updateTotals();
+    renderPreview(createDraftFromForm());
+    elements.companyProfileMessage.textContent = `${profile.businessName} saved successfully.`;
+  } catch (error) {
+    console.error("Failed to save company profile.", error);
+    elements.companyProfileMessage.textContent = `Failed to save company profile. ${error.message || "Please try again."}`;
+  }
 }
 
 function addItemRow(item = {}) {
@@ -550,25 +821,30 @@ function updateTotals() {
 
 async function handleSaveInvoice(event) {
   event.preventDefault();
-  const invoice = createDraftFromForm();
-  if (!invoice.items.length) {
-    window.alert("Please add at least one item with quantity and rate.");
-    return;
-  }
+  try {
+    const invoice = createDraftFromForm();
+    if (!invoice.items.length) {
+      window.alert("Please add at least one item with quantity and rate.");
+      return;
+    }
 
-  state.invoices.unshift({
-    ...invoice,
-    id: crypto.randomUUID ? crypto.randomUUID() : `invoice-${Date.now()}`,
-    createdAt: new Date().toISOString()
-  });
-  await saveInvoices();
-  await incrementDocumentCounter(invoice.documentType);
-  renderDashboard();
-  renderInvoicesTable();
-  renderPreview(invoice);
-  window.alert(`${getDocumentLabel(invoice.documentType)} ${invoice.invoiceNumber} saved successfully.`);
-  resetForm();
-  switchTab("all-invoices");
+    state.invoices.unshift(normalizeInvoiceRecord({
+      ...invoice,
+      id: crypto.randomUUID ? crypto.randomUUID() : `invoice-${Date.now()}`,
+      createdAt: new Date().toISOString()
+    }));
+    await saveInvoices();
+    await incrementDocumentCounter(invoice.documentType);
+    renderDashboard();
+    renderInvoicesTable();
+    renderPreview(invoice);
+    window.alert(`${getDocumentLabel(invoice.documentType)} ${invoice.invoiceNumber} saved successfully.`);
+    resetForm();
+    switchTab("all-invoices");
+  } catch (error) {
+    console.error("Failed to save invoice.", error);
+    window.alert(`Failed to save document. ${error.message || "Please try again."}`);
+  }
 }
 
 function createDraftFromForm() {
@@ -678,17 +954,25 @@ function bindInvoiceTableActions(container) {
 }
 
 async function rotateStatus(id) {
-  const statuses = ["Pending", "Paid", "Draft"];
-  state.invoices = state.invoices.map((invoice) => {
-    if (invoice.id !== id) {
-      return invoice;
-    }
-    const currentIndex = statuses.indexOf(invoice.status);
-    return { ...invoice, status: statuses[(currentIndex + 1) % statuses.length] };
-  });
-  await saveInvoices();
-  renderDashboard();
-  renderInvoicesTable();
+  try {
+    const statuses = ["Pending", "Paid", "Draft"];
+    state.invoices = state.invoices.map((invoice) => {
+      if (invoice.id !== id) {
+        return invoice;
+      }
+      const currentIndex = statuses.indexOf(invoice.status);
+      return normalizeInvoiceRecord({
+        ...invoice,
+        status: statuses[(currentIndex + 1) % statuses.length]
+      });
+    });
+    await saveInvoices();
+    renderDashboard();
+    renderInvoicesTable();
+  } catch (error) {
+    console.error("Failed to update invoice status.", error);
+    window.alert(`Failed to update invoice status. ${error.message || "Please try again."}`);
+  }
 }
 
 async function deleteInvoice(id) {
@@ -697,10 +981,15 @@ async function deleteInvoice(id) {
   if (!confirmed) {
     return;
   }
-  state.invoices = state.invoices.filter((entry) => entry.id !== id);
-  await saveInvoices();
-  renderDashboard();
-  renderInvoicesTable();
+  try {
+    state.invoices = state.invoices.filter((entry) => entry.id !== id);
+    await saveInvoices();
+    renderDashboard();
+    renderInvoicesTable();
+  } catch (error) {
+    console.error("Failed to delete invoice.", error);
+    window.alert(`Failed to delete invoice. ${error.message || "Please try again."}`);
+  }
 }
 
 function renderPreview(invoice) {
@@ -709,6 +998,15 @@ function renderPreview(invoice) {
     elements.invoicePreview.innerHTML = `<div class="empty-state">Fill the form to see a live document preview.</div>`;
     return;
   }
+  const businessProfile = state.businessProfile;
+  const paymentLines = [
+    businessProfile.bankName,
+    businessProfile.accountHolder ? `Account Name: ${businessProfile.accountHolder}` : "",
+    businessProfile.accountNumber ? `A/C: ${businessProfile.accountNumber}` : "",
+    businessProfile.ifscCode ? `IFSC: ${businessProfile.ifscCode}` : "",
+    businessProfile.upiId ? `UPI: ${businessProfile.upiId}` : "",
+    businessProfile.bankNotes
+  ].filter(Boolean);
 
   const documentType = invoice.documentType || "Bill";
   const documentLabel = getDocumentLabel(documentType);
@@ -735,11 +1033,11 @@ function renderPreview(invoice) {
     <div class="invoice-paper-header">
       <div>
         <p class="section-kicker">${documentLabel}</p>
-        <h2>${SETTINGS.businessName}</h2>
-        <p>${SETTINGS.address}</p>
-        <p>Email: ${SETTINGS.businessEmail}</p>
-        <p>Phone: ${SETTINGS.businessPhone}</p>
-        <p>GSTIN: ${SETTINGS.businessGst}</p>
+        <h2>${escapeHtml(businessProfile.businessName || "Your Company")}</h2>
+        <p>${escapeHtml(businessProfile.address || "Add your company address from the Company tab.")}</p>
+        <p>Email: ${escapeHtml(businessProfile.businessEmail || "-")}</p>
+        <p>Phone: ${escapeHtml(businessProfile.businessPhone || "-")}</p>
+        <p>GSTIN: ${escapeHtml(businessProfile.businessGst || "-")}</p>
       </div>
       <div class="preview-meta">
         <span>${numberLabel}</span>
@@ -764,7 +1062,7 @@ function renderPreview(invoice) {
       </div>
       <div>
         <p class="section-kicker">Payment Notes</p>
-        ${invoice.notes.split("\n").map((line) => `<p>${escapeHtml(line)}</p>`).join("")}
+        ${(invoice.notes || "").split("\n").filter(Boolean).map((line) => `<p>${escapeHtml(line)}</p>`).join("")}
       </div>
     </div>
 
@@ -792,10 +1090,9 @@ function renderPreview(invoice) {
     <div class="invoice-paper-footer">
       <div>
         <p class="section-kicker">Bank Details</p>
-        <p>Bank of Baroda</p>
-        <p>A/C: 35090200000586</p>
-        <p>IFSC: BARB0MOHANL</p>
-        <p>Branch: Mohanlalganj, Lucknow</p>
+        ${paymentLines.length
+          ? paymentLines.map((line) => `<p>${escapeHtml(line)}</p>`).join("")
+          : "<p>Add your bank details from the Company tab.</p>"}
       </div>
       <div>
         <p class="section-kicker">Declaration</p>
@@ -964,11 +1261,495 @@ function clearSession() {
   localStorage.removeItem(SESSION_KEY);
 }
 
-function generateOtp() {
-  return String(Math.floor(100000 + Math.random() * 900000));
+function clearAuthMessages() {
+  elements.loginError.textContent = "";
+  elements.authMessage.textContent = "";
+}
+
+function buildAuthRedirectUrl() {
+  if (window.location.protocol === "file:") {
+    return null;
+  }
+
+  return window.location.href;
+}
+
+function createSessionFromSupabaseUser(user) {
+  const metadata = user.user_metadata || {};
+  return {
+    id: user.id,
+    userId: metadata.user_id || user.email?.split("@")[0] || "user",
+    name: metadata.name || user.email || "User",
+    email: user.email || "",
+    companyName: metadata.company_name || "",
+    businessGst: metadata.business_gst || "",
+    businessPhone: metadata.business_phone || "",
+    businessAddress: metadata.business_address || ""
+  };
+}
+
+function canUseSupabaseStorage() {
+  return Boolean(supabaseClient && state.currentUser?.id);
+}
+
+function createCurrentUserRecord(overrides = {}) {
+  return {
+    userId: overrides.userId || state.currentUser?.userId || "user",
+    name: overrides.name || state.currentUser?.name || "User",
+    email: overrides.email || state.currentUser?.email || "",
+    companyName: overrides.companyName || state.currentUser?.companyName || "",
+    supabaseUserId: overrides.supabaseUserId || state.currentUser?.id || ""
+  };
+}
+
+function mapBusinessProfileFromProfile(profile = null) {
+  if (!profile) {
+    return normalizeBusinessProfile();
+  }
+
+  return normalizeBusinessProfile({
+    businessName: profile.business_name,
+    businessEmail: profile.business_email,
+    businessPhone: profile.business_phone,
+    businessGst: profile.business_gst,
+    address: profile.business_address,
+    bankName: profile.bank_name,
+    accountHolder: profile.account_holder,
+    accountNumber: profile.account_number,
+    ifscCode: profile.ifsc_code,
+    upiId: profile.upi_id,
+    defaultGst: profile.default_gst,
+    bankNotes: profile.bank_notes
+  });
+}
+
+function buildUserState(profile = null) {
+  if (!state.currentUser) {
+    return [];
+  }
+
+  if (!profile) {
+    return [createCurrentUserRecord()];
+  }
+
+  return [createCurrentUserRecord({
+    userId: profile.user_id,
+    name: profile.full_name,
+    email: profile.email,
+    companyName: profile.company_name
+  })];
+}
+
+function createWorkspaceSnapshot() {
+  return JSON.parse(JSON.stringify({
+    invoices: state.invoices,
+    users: state.users,
+    items: state.items,
+    nextInvoiceCounter: state.nextInvoiceCounter,
+    proformaCounter: state.proformaCounter
+  }));
+}
+
+function shouldSeedSupabaseWorkspace(localSnapshot, remoteWorkspace) {
+  const hasRemoteRecords = remoteWorkspace.invoices.length || remoteWorkspace.items.length;
+  const hasLocalRecords = localSnapshot.invoices.length || localSnapshot.items.length;
+  const localUserMatchesCurrent = localSnapshot.users.some((entry) =>
+    entry.email?.toLowerCase() === state.currentUser?.email?.toLowerCase()
+  );
+  const localLooksLikeLegacySingleUser = localSnapshot.users.every((entry) =>
+    !entry.email || entry.userId === DEFAULT_USER.userId
+  );
+
+  return !hasRemoteRecords && hasLocalRecords && (localUserMatchesCurrent || localLooksLikeLegacySingleUser || !localSnapshot.users.length);
+}
+
+function normalizeItemRecord(item) {
+  return {
+    id: item.id || (crypto.randomUUID ? crypto.randomUUID() : `item-${Date.now()}`),
+    name: String(item.name || "").trim(),
+    hsnCode: String(item.hsnCode || "").trim(),
+    rate: readNumber(item.rate),
+    stockQty: readNumber(item.stockQty)
+  };
+}
+
+function normalizeInvoiceRecord(invoice) {
+  return {
+    ...invoice,
+    id: invoice.id || (crypto.randomUUID ? crypto.randomUUID() : `invoice-${Date.now()}`),
+    createdAt: invoice.createdAt || new Date().toISOString(),
+    documentType: invoice.documentType || "Bill",
+    clientName: String(invoice.clientName || "").trim(),
+    clientEmail: String(invoice.clientEmail || "").trim(),
+    clientPhone: String(invoice.clientPhone || "").trim(),
+    clientGst: String(invoice.clientGst || "").trim(),
+    clientAddress: String(invoice.clientAddress || "").trim(),
+    invoiceNumber: String(invoice.invoiceNumber || "").trim(),
+    invoiceDate: invoice.invoiceDate || todayString(),
+    dueDate: invoice.dueDate || todayString(7),
+    status: invoice.status || "Pending",
+    gstPercent: readNumber(invoice.gstPercent),
+    discountPercent: readNumber(invoice.discountPercent),
+    notes: String(invoice.notes || ""),
+    items: Array.isArray(invoice.items) ? invoice.items.map((item) => ({
+      description: String(item.description || "").trim(),
+      hsnCode: String(item.hsnCode || "").trim(),
+      quantity: readNumber(item.quantity),
+      rate: readNumber(item.rate),
+      itemDiscountPercent: readNumber(item.itemDiscountPercent),
+      baseAmount: readNumber(item.baseAmount),
+      amount: readNumber(item.amount)
+    })) : [],
+    subtotal: readNumber(invoice.subtotal),
+    itemDiscountTotal: readNumber(invoice.itemDiscountTotal),
+    invoiceLevelDiscountAmount: readNumber(invoice.invoiceLevelDiscountAmount),
+    discountAmount: readNumber(invoice.discountAmount),
+    taxableAmount: readNumber(invoice.taxableAmount),
+    gstAmount: readNumber(invoice.gstAmount),
+    total: readNumber(invoice.total)
+  };
+}
+
+function mapItemToSupabaseRow(item) {
+  return {
+    id: item.id,
+    user_id: state.currentUser.id,
+    name: item.name,
+    hsn_code: item.hsnCode || null,
+    rate: readNumber(item.rate),
+    stock_qty: readNumber(item.stockQty)
+  };
+}
+
+function mapItemFromSupabaseRow(row) {
+  return normalizeItemRecord({
+    id: row.id,
+    name: row.name,
+    hsnCode: row.hsn_code,
+    rate: row.rate,
+    stockQty: row.stock_qty
+  });
+}
+
+function mapInvoiceToSupabaseRow(invoice) {
+  return {
+    id: invoice.id,
+    user_id: state.currentUser.id,
+    document_type: invoice.documentType,
+    client_name: invoice.clientName,
+    client_email: invoice.clientEmail,
+    client_phone: invoice.clientPhone,
+    client_gst: invoice.clientGst,
+    client_address: invoice.clientAddress,
+    invoice_number: invoice.invoiceNumber,
+    invoice_date: invoice.invoiceDate || null,
+    due_date: invoice.dueDate || null,
+    status: invoice.status,
+    gst_percent: readNumber(invoice.gstPercent),
+    discount_percent: readNumber(invoice.discountPercent),
+    notes: invoice.notes || "",
+    items: invoice.items || [],
+    subtotal: readNumber(invoice.subtotal),
+    item_discount_total: readNumber(invoice.itemDiscountTotal),
+    invoice_level_discount_amount: readNumber(invoice.invoiceLevelDiscountAmount),
+    discount_amount: readNumber(invoice.discountAmount),
+    taxable_amount: readNumber(invoice.taxableAmount),
+    gst_amount: readNumber(invoice.gstAmount),
+    total: readNumber(invoice.total),
+    created_at: invoice.createdAt || new Date().toISOString()
+  };
+}
+
+function mapInvoiceFromSupabaseRow(row) {
+  return normalizeInvoiceRecord({
+    id: row.id,
+    documentType: row.document_type,
+    clientName: row.client_name,
+    clientEmail: row.client_email,
+    clientPhone: row.client_phone,
+    clientGst: row.client_gst,
+    clientAddress: row.client_address,
+    invoiceNumber: row.invoice_number,
+    invoiceDate: row.invoice_date,
+    dueDate: row.due_date,
+    status: row.status,
+    gstPercent: row.gst_percent,
+    discountPercent: row.discount_percent,
+    notes: row.notes,
+    items: row.items,
+    subtotal: row.subtotal,
+    itemDiscountTotal: row.item_discount_total,
+    invoiceLevelDiscountAmount: row.invoice_level_discount_amount,
+    discountAmount: row.discount_amount,
+    taxableAmount: row.taxable_amount,
+    gstAmount: row.gst_amount,
+    total: row.total,
+    createdAt: row.created_at
+  });
+}
+
+async function cacheWorkspaceLocally() {
+  await replaceStoreContents(INVOICES_STORE, state.invoices);
+  await replaceStoreContents(USERS_STORE, state.users);
+  await replaceStoreContents(ITEMS_STORE, state.items);
+  await setMetaValue("invoiceCounter", state.nextInvoiceCounter);
+  await setMetaValue("proformaCounter", state.proformaCounter);
+}
+
+async function saveBusinessProfile() {
+  if (!state.currentUser?.id || !supabaseClient) {
+    return;
+  }
+
+  state.currentUser = {
+    ...state.currentUser,
+    companyName: state.businessProfile.businessName || state.currentUser.companyName
+  };
+  saveSession(state.currentUser);
+  state.users = [createCurrentUserRecord()];
+  await saveUsers();
+
+  const sessionUser = createSessionFromSupabaseUser({
+    id: state.currentUser.id,
+    email: state.currentUser.email,
+    user_metadata: {
+      user_id: state.currentUser.userId,
+      name: state.currentUser.name,
+      company_name: state.currentUser.companyName
+    }
+  });
+
+  const { error } = await supabaseClient
+    .from("profiles")
+    .upsert({
+      id: state.currentUser.id,
+      user_id: sessionUser.userId,
+      full_name: sessionUser.name,
+      email: sessionUser.email,
+      company_name: sessionUser.companyName || state.businessProfile.businessName,
+      business_name: state.businessProfile.businessName,
+      business_email: state.businessProfile.businessEmail,
+      business_phone: state.businessProfile.businessPhone,
+      business_gst: state.businessProfile.businessGst,
+      business_address: state.businessProfile.address,
+      bank_name: state.businessProfile.bankName,
+      account_holder: state.businessProfile.accountHolder,
+      account_number: state.businessProfile.accountNumber,
+      ifsc_code: state.businessProfile.ifscCode,
+      upi_id: state.businessProfile.upiId,
+      default_gst: state.businessProfile.defaultGst,
+      bank_notes: state.businessProfile.bankNotes,
+      updated_at: new Date().toISOString()
+    }, {
+      onConflict: "id"
+    });
+
+  if (error) {
+    throw error;
+  }
+}
+
+async function replaceSupabaseRows(tableName, rows) {
+  const { data: existingRows, error: selectError } = await supabaseClient
+    .from(tableName)
+    .select("id")
+    .eq("user_id", state.currentUser.id);
+
+  if (selectError) {
+    throw selectError;
+  }
+
+  const existingIds = (existingRows || []).map((row) => row.id);
+  const incomingIds = rows.map((row) => row.id);
+  const idsToDelete = existingIds.filter((id) => !incomingIds.includes(id));
+
+  if (idsToDelete.length) {
+    const { error: deleteError } = await supabaseClient
+      .from(tableName)
+      .delete()
+      .eq("user_id", state.currentUser.id)
+      .in("id", idsToDelete);
+
+    if (deleteError) {
+      throw deleteError;
+    }
+  }
+
+  if (!rows.length) {
+    return;
+  }
+
+  const { error: upsertError } = await supabaseClient
+    .from(tableName)
+    .upsert(rows, { onConflict: "id" });
+
+  if (upsertError) {
+    throw upsertError;
+  }
+}
+
+async function saveUserCounters() {
+  if (canUseSupabaseStorage()) {
+    const { error } = await supabaseClient
+      .from("user_counters")
+      .upsert({
+        user_id: state.currentUser.id,
+        invoice_counter: state.nextInvoiceCounter,
+        proforma_counter: state.proformaCounter
+      }, {
+        onConflict: "user_id"
+      });
+
+    if (error) {
+      throw error;
+    }
+  }
+
+  await setMetaValue("invoiceCounter", state.nextInvoiceCounter);
+  await setMetaValue("proformaCounter", state.proformaCounter);
+}
+
+async function loadWorkspaceData() {
+  if (!canUseSupabaseStorage()) {
+    return;
+  }
+
+  const localSnapshot = createWorkspaceSnapshot();
+  const [{ data: profile }, { data: items, error: itemsError }, { data: invoices, error: invoicesError }, { data: counters, error: countersError }] = await Promise.all([
+    supabaseClient.from("profiles").select("*").eq("id", state.currentUser.id).maybeSingle(),
+    supabaseClient.from("items").select("*").eq("user_id", state.currentUser.id).order("name"),
+    supabaseClient.from("invoices").select("*").eq("user_id", state.currentUser.id).order("created_at", { ascending: false }),
+    supabaseClient.from("user_counters").select("*").eq("user_id", state.currentUser.id).maybeSingle()
+  ]);
+
+  if (itemsError || invoicesError || countersError) {
+    throw itemsError || invoicesError || countersError;
+  }
+
+  if (profile) {
+    state.currentUser = {
+      ...state.currentUser,
+      userId: profile.user_id || state.currentUser.userId,
+      name: profile.full_name || state.currentUser.name,
+      email: profile.email || state.currentUser.email,
+      companyName: profile.company_name || state.currentUser.companyName
+    };
+    saveSession(state.currentUser);
+  }
+  state.businessProfile = mapBusinessProfileFromProfile(profile);
+
+  const remoteWorkspace = {
+    invoices: (invoices || []).map(mapInvoiceFromSupabaseRow),
+    items: (items || []).map(mapItemFromSupabaseRow),
+    nextInvoiceCounter: Math.max(1, Number(counters?.invoice_counter) || 1),
+    proformaCounter: Math.max(1, Number(counters?.proforma_counter) || 1)
+  };
+
+  if (shouldSeedSupabaseWorkspace(localSnapshot, remoteWorkspace)) {
+    state.invoices = localSnapshot.invoices.map(normalizeInvoiceRecord);
+    state.items = localSnapshot.items.map(normalizeItemRecord);
+    state.users = buildUserState(profile);
+    state.nextInvoiceCounter = Math.max(1, Number(localSnapshot.nextInvoiceCounter) || 1);
+    state.proformaCounter = Math.max(1, Number(localSnapshot.proformaCounter) || 1);
+    await saveInvoices();
+    await saveItems();
+    await saveUserCounters();
+    return;
+  }
+
+  state.invoices = remoteWorkspace.invoices;
+  state.items = remoteWorkspace.items;
+  state.users = buildUserState(profile);
+  state.nextInvoiceCounter = remoteWorkspace.nextInvoiceCounter;
+  state.proformaCounter = remoteWorkspace.proformaCounter;
+  await cacheWorkspaceLocally();
+}
+
+async function applyAuthenticatedUser(user) {
+  state.currentUser = createSessionFromSupabaseUser(user);
+  saveSession(state.currentUser);
+  await syncUserProfile(user);
+  try {
+    await loadWorkspaceData();
+  } catch (error) {
+    console.error("Failed to load Supabase workspace.", error);
+    elements.authMessage.textContent = "Signed in, but your cloud data could not be loaded. Showing the local cache for now.";
+  }
+  updateSessionLabel();
+  showApp();
+  initializeBillingApp();
+  if (!state.businessProfile.businessName) {
+    elements.authMessage.textContent = "Finish your company setup to personalize invoices and inventory for this account.";
+    switchTab("company");
+  }
+}
+
+async function syncUserProfile(user) {
+  const sessionUser = createSessionFromSupabaseUser(user);
+  const nextBusinessProfile = normalizeBusinessProfile({
+    ...state.businessProfile,
+    businessName: state.businessProfile.businessName || sessionUser.companyName
+  });
+  state.businessProfile = nextBusinessProfile;
+
+  const existingUserIndex = state.users.findIndex((entry) => entry.email?.toLowerCase() === sessionUser.email.toLowerCase());
+  const localUserRecord = {
+    userId: sessionUser.userId,
+    name: sessionUser.name,
+    email: sessionUser.email,
+    companyName: sessionUser.companyName,
+    supabaseUserId: user.id
+  };
+
+  if (existingUserIndex >= 0) {
+    state.users = [{
+      ...state.users[existingUserIndex],
+      ...localUserRecord
+    }];
+  } else {
+    state.users = [localUserRecord];
+  }
+
+  await saveUsers();
+
+  if (!supabaseClient) {
+    return;
+  }
+
+  const { error } = await supabaseClient
+    .from("profiles")
+    .upsert({
+      id: user.id,
+      user_id: sessionUser.userId,
+      full_name: sessionUser.name,
+      email: sessionUser.email,
+      company_name: sessionUser.companyName,
+      business_name: nextBusinessProfile.businessName,
+      business_email: nextBusinessProfile.businessEmail,
+      business_phone: nextBusinessProfile.businessPhone,
+      business_gst: nextBusinessProfile.businessGst,
+      business_address: nextBusinessProfile.address,
+      bank_name: nextBusinessProfile.bankName,
+      account_holder: nextBusinessProfile.accountHolder,
+      account_number: nextBusinessProfile.accountNumber,
+      ifsc_code: nextBusinessProfile.ifscCode,
+      upi_id: nextBusinessProfile.upiId,
+      default_gst: nextBusinessProfile.defaultGst,
+      bank_notes: nextBusinessProfile.bankNotes,
+      updated_at: new Date().toISOString()
+    }, {
+      onConflict: "id"
+    });
+
+  if (error) {
+    console.warn("Profile sync skipped.", error.message);
+  }
 }
 
 async function saveInvoices() {
+  if (canUseSupabaseStorage()) {
+    await replaceSupabaseRows("invoices", state.invoices.map(mapInvoiceToSupabaseRow));
+  }
   await replaceStoreContents(INVOICES_STORE, state.invoices);
 }
 
@@ -986,12 +1767,12 @@ function getNextDocumentNumber(documentType = "Bill") {
 async function incrementDocumentCounter(documentType = "Bill") {
   if (documentType === "Proforma Invoice") {
     state.proformaCounter += 1;
-    await setMetaValue("proformaCounter", state.proformaCounter);
+    await saveUserCounters();
     return;
   }
 
   state.nextInvoiceCounter += 1;
-  await setMetaValue("invoiceCounter", state.nextInvoiceCounter);
+  await saveUserCounters();
 }
 
 async function saveUsers() {
@@ -999,6 +1780,9 @@ async function saveUsers() {
 }
 
 async function saveItems() {
+  if (canUseSupabaseStorage()) {
+    await replaceSupabaseRows("items", state.items.map(mapItemToSupabaseRow));
+  }
   await replaceStoreContents(ITEMS_STORE, state.items);
 }
 
@@ -1072,6 +1856,7 @@ function createBackupPayload() {
     invoices: state.invoices,
     users: state.users,
     items: state.items,
+    businessProfile: state.businessProfile,
     meta: {
       invoiceCounter: state.nextInvoiceCounter,
       proformaCounter: state.proformaCounter
@@ -1098,6 +1883,7 @@ function validateBackupPayload(payload) {
     invoices: payload.invoices,
     users: payload.users,
     items: payload.items,
+    businessProfile: normalizeBusinessProfile(payload.businessProfile),
     meta: {
       invoiceCounter: invoiceCounter > 0 ? invoiceCounter : 1,
       proformaCounter: proformaCounter > 0 ? proformaCounter : 1

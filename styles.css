@@ -59,21 +59,34 @@ button, input, textarea, select { font: inherit; }
   margin: 24px 0 16px;
 }
 
-.compact-form {
-  margin-top: 16px;
-  margin-bottom: 8px;
+.auth-switcher {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: 24px;
 }
 
-.auth-panel {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--line);
-}
-
-.auth-panel summary {
-  cursor: pointer;
-  font-weight: 800;
+.auth-tab {
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.72);
   color: var(--brand-dark);
+  padding: 12px 14px;
+  border-radius: 999px;
+  font-weight: 800;
+}
+
+.auth-tab.active {
+  background: linear-gradient(180deg, var(--brand) 0%, var(--brand-dark) 100%);
+  color: white;
+  box-shadow: 0 10px 24px rgba(109, 51, 17, 0.22);
+}
+
+.auth-view {
+  display: none;
+}
+
+.auth-view.active {
+  display: grid;
 }
 
 .login-hint,
@@ -400,6 +413,7 @@ th { font-size: 0.9rem; }
   .hero, .form-grid, .stat-grid, .field-grid { grid-template-columns: 1fr; }
   .page-shell { width: min(100% - 20px, 1200px); }
   .preview-paper { padding: 22px; }
+  .auth-switcher { grid-template-columns: 1fr; }
   .invoice-paper-header, .invoice-paper-meta, .invoice-paper-footer, .section-heading, .preview-toolbar, .button-row, .app-toolbar {
     flex-direction: column;
     align-items: flex-start;

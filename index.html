@@ -3,33 +3,50 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AWANSHI ENTERPRISES Bill / Proforma Invoice Software</title>
+  <title>Billing Workspace</title>
   <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase-config.js"></script>
 </head>
 <body>
   <section class="login-screen" id="loginScreen">
     <div class="login-card">
       <p class="eyebrow">Secure Access</p>
-      <h1>Login to AWANSHI ENTERPRISES</h1>
-      <p class="hero-copy">Sign in with your user ID and password to open the billing software.</p>
-      <form id="loginForm" class="login-form">
-        <label>User ID<input type="text" name="userId" placeholder="Enter user ID" required></label>
+      <h1>Access Your Billing Workspace</h1>
+      <p class="hero-copy">Create your account, confirm your email, and sign in to open the billing software.</p>
+      <div class="auth-switcher" role="tablist" aria-label="Authentication forms">
+        <button type="button" class="auth-tab active" data-auth-view="login">Login</button>
+        <button type="button" class="auth-tab" data-auth-view="signup">Sign Up</button>
+        <button type="button" class="auth-tab" data-auth-view="reset">Forgot Password</button>
+      </div>
+
+      <form id="loginForm" class="login-form auth-view active" data-auth-view-panel="login">
+        <label>Email ID<input type="email" name="email" placeholder="Enter your email ID" required></label>
         <label>Password<input type="password" name="password" placeholder="Enter password" required></label>
         <button type="submit" class="primary-button">Login</button>
       </form>
-      <details class="auth-panel">
-        <summary>Change Password by Email ID</summary>
-        <form id="passwordResetForm" class="login-form compact-form">
-          <label>Email ID<input type="email" name="email" placeholder="Enter registered email ID" required></label>
-          <button type="button" class="secondary-button" id="sendOtpButton">Send OTP</button>
-          <label>OTP<input type="text" name="otp" placeholder="Enter OTP" inputmode="numeric" maxlength="6" required></label>
-          <label>New Password<input type="password" name="newPassword" placeholder="Enter new password" required></label>
-          <label>Confirm Password<input type="password" name="confirmPassword" placeholder="Confirm new password" required></label>
-          <button type="submit" class="secondary-button">Verify OTP and Update Password</button>
-        </form>
-        <p class="login-hint">This local version shows the OTP on screen for demo use. Real email OTP can be added with a backend mail service later.</p>
-        <p id="passwordResetMessage" class="login-hint"></p>
-      </details>
+
+      <form id="signupForm" class="login-form auth-view" data-auth-view-panel="signup">
+        <label>Full Name<input type="text" name="name" placeholder="Enter full name" required></label>
+        <label>User ID<input type="text" name="userId" placeholder="Choose a user ID" required></label>
+        <label>Company Name<input type="text" name="companyName" placeholder="Enter company name" required></label>
+        <label>GSTIN<input type="text" name="businessGst" placeholder="Enter GSTIN"></label>
+        <label>Phone Number<input type="text" name="businessPhone" placeholder="Enter phone number"></label>
+        <label class="full-span">Address<textarea name="businessAddress" rows="3" placeholder="Enter business address"></textarea></label>
+        <label class="full-span">Bank Details / Payment Notes<textarea name="bankNotes" rows="5" placeholder="Enter bank name, account number, IFSC, UPI, or payment instructions"></textarea></label>
+        <label>Email ID<input type="email" name="email" placeholder="Enter email ID" required></label>
+        <label>Password<input type="password" name="password" placeholder="Create password" minlength="6" required></label>
+        <label>Confirm Password<input type="password" name="confirmPassword" placeholder="Confirm password" minlength="6" required></label>
+        <button type="submit" class="primary-button">Create Account</button>
+      </form>
+
+      <form id="passwordResetForm" class="login-form auth-view" data-auth-view-panel="reset">
+        <label>Email ID<input type="email" name="email" placeholder="Enter registered email ID" required></label>
+        <button type="submit" class="secondary-button">Send Reset Email</button>
+      </form>
+
+      <p class="login-hint" id="authHint">Email confirmation is handled by Supabase. After confirming your email, return here and log in.</p>
+      <p id="authMessage" class="login-hint"></p>
       <p id="loginError" class="login-error"></p>
     </div>
   </section>
@@ -46,20 +63,21 @@
     <header class="hero">
       <div>
         <p class="eyebrow">GST Bill Workspace</p>
-        <h1>AWANSHI ENTERPRISES</h1>
-        <p class="hero-copy">Create, manage, preview, and print professional Tax invoices and proforma invoices with your business and bank details pre-filled.</p>
+        <h1 id="heroBusinessName">Your Company Workspace</h1>
+        <p class="hero-copy" id="heroBusinessCopy">Create, manage, preview, and print professional tax invoices with your own business and bank details.</p>
       </div>
       <div class="hero-card">
         <p class="hero-label">Business Details</p>
-        <strong>GSTIN: 09GNKPM2232K1ZN</strong>
-        <span>Jabrauli, Mohanlalganj, Lucknow, Uttar Pradesh - 226301</span>
-        <span>Email: eawanshi@gmail.com</span>
-        <span>Phone: 9026443176, 7985253134</span>
+        <strong id="heroBusinessGst">GSTIN: Not added yet</strong>
+        <span id="heroBusinessAddress">Add your company address from the Company tab.</span>
+        <span id="heroBusinessEmail">Email: Not added yet</span>
+        <span id="heroBusinessPhone">Phone: Not added yet</span>
       </div>
     </header>
 
     <nav class="tabs" aria-label="Sections">
       <button class="tab-button active" data-tab="dashboard">Dashboard</button>
+      <button class="tab-button" data-tab="company">Company</button>
       <button class="tab-button" data-tab="item-store">Item Store</button>
       <button class="tab-button" data-tab="new-invoice">New Bill</button>
       <button class="tab-button" data-tab="all-invoices">All Bills</button>
@@ -213,6 +231,50 @@
             </div>
           </div>
         </form>
+      </section>
+
+      <section id="company" class="tab-panel">
+        <div class="form-grid">
+          <div class="panel">
+            <div class="section-heading">
+              <div>
+                <p class="section-kicker">Onboarding</p>
+                <h3>Company Details</h3>
+              </div>
+            </div>
+            <p class="panel-copy">Each account gets its own business profile, invoice header, and bank notes. Fill this once and your billing workspace will use it everywhere.</p>
+            <form id="companyProfileForm">
+              <div class="field-grid">
+                <label>Company Name<input type="text" name="businessName" placeholder="Enter company name" required></label>
+                <label>GSTIN<input type="text" name="businessGst" placeholder="Enter GSTIN"></label>
+                <label>Email<input type="email" name="businessEmail" placeholder="Enter business email"></label>
+                <label>Phone<input type="text" name="businessPhone" placeholder="Enter business phone"></label>
+                <label class="full-span">Address<textarea name="businessAddress" rows="3" placeholder="Enter company address"></textarea></label>
+                <label>Bank Name<input type="text" name="bankName" placeholder="Enter bank name"></label>
+                <label>Account Holder<input type="text" name="accountHolder" placeholder="Enter account holder name"></label>
+                <label>Account Number<input type="text" name="accountNumber" placeholder="Enter account number"></label>
+                <label>IFSC Code<input type="text" name="ifscCode" placeholder="Enter IFSC code"></label>
+                <label>UPI ID<input type="text" name="upiId" placeholder="Enter UPI ID"></label>
+                <label class="full-span">Bank / Payment Notes<textarea name="bankNotes" rows="5" placeholder="Enter payment instructions and thank-you note"></textarea></label>
+              </div>
+              <div class="button-row compact-actions">
+                <button type="submit" class="primary-button">Save Company</button>
+                <button type="button" class="secondary-button" id="resetCompanyProfileForm">Reset</button>
+              </div>
+            </form>
+            <p id="companyProfileMessage" class="panel-copy"></p>
+          </div>
+
+          <div class="panel">
+            <div class="section-heading">
+              <div>
+                <p class="section-kicker">Current Profile</p>
+                <h3>Live Business Snapshot</h3>
+              </div>
+            </div>
+            <div id="companyProfileSummary" class="table-wrap"></div>
+          </div>
+        </div>
       </section>
 
       <section id="item-store" class="tab-panel">
