@@ -11,6 +11,7 @@ const ITEMS_STORE = "items";
 const META_STORE = "meta";
 const SUPABASE_CONFIG = window.APP_CONFIG || {};
 const supabaseClient = initializeSupabase();
+const BACKEND_URL = getBackendBaseUrl();
 const DEFAULT_USER = {
   userId: "admin",
   password: "golu123",
@@ -44,7 +45,16 @@ const state = {
   proformaCounter: 1,
   db: null,
   appReady: false,
-  authSubscription: null
+  authSubscription: null,
+  signupUsernameCheck: {
+    username: "",
+    available: false,
+    checking: false,
+    requestId: 0,
+    timerId: null
+  },
+  signupSubmitting: false,
+  onboardingRequired: false
 };
 
 const elements = {
@@ -53,6 +63,10 @@ const elements = {
   authPanels: [...document.querySelectorAll("[data-auth-view-panel]")],
   loginForm: document.getElementById("loginForm"),
   signupForm: document.getElementById("signupForm"),
+  signupUserIdStatus: document.getElementById("signupUserIdStatus"),
+  signupUserIdTick: document.getElementById("signupUserIdTick"),
+  signupSubmitHint: document.getElementById("signupSubmitHint"),
+  signupSubmitButton: document.getElementById("signupSubmitButton"),
   loginError: document.getElementById("loginError"),
   passwordResetForm: document.getElementById("passwordResetForm"),
   authHint: document.getElementById("authHint"),
@@ -131,6 +145,18 @@ function initializeSupabase() {
   }
 }
 
+function getBackendBaseUrl() {
+  if (SUPABASE_CONFIG.backendUrl) {
+    return SUPABASE_CONFIG.backendUrl;
+  }
+
+  if (window.location.protocol === "http:" || window.location.protocol === "https:") {
+    return `${window.location.protocol}//${window.location.hostname}:3000`;
+  }
+
+  return "http://127.0.0.1:3000";
+}
+
 async function initializeApp() {
   state.db = await openDatabase();
   await migrateLegacyData();
@@ -178,6 +204,7 @@ function initializeBillingApp() {
 
 function bindAuthActions() {
   bindAuthTabs();
+  bindSignupUsernameAvailability();
   elements.loginForm.addEventListener("submit", handleLogin);
   elements.signupForm.addEventListener("submit", handleSignup);
   elements.passwordResetForm.addEventListener("submit", handlePasswordReset);
@@ -188,6 +215,38 @@ function bindAuthTabs() {
   elements.authTabs.forEach((button) => {
     button.addEventListener("click", () => setAuthView(button.dataset.authView));
   });
+}
+
+function bindSignupUsernameAvailability() {
+  const usernameField = elements.signupForm?.elements.userId;
+  const emailField = elements.signupForm?.elements.email;
+  const passwordField = elements.signupForm?.elements.password;
+  if (!usernameField) {
+    return;
+  }
+
+  usernameField.addEventListener("input", () => {
+    const normalizedValue = normalizeUsernameInput(usernameField.value);
+    if (usernameField.value !== normalizedValue) {
+      usernameField.value = normalizedValue;
+    }
+    queueUsernameAvailabilityCheck(normalizedValue);
+  });
+
+  usernameField.addEventListener("blur", () => {
+    const normalizedValue = normalizeUsernameInput(usernameField.value);
+    if (normalizedValue) {
+      queueUsernameAvailabilityCheck(normalizedValue, true);
+    }
+  });
+
+  emailField?.addEventListener("input", updateSignupSubmitState);
+  emailField?.addEventListener("change", updateSignupSubmitState);
+  passwordField?.addEventListener("input", updateSignupSubmitState);
+  passwordField?.addEventListener("change", updateSignupSubmitState);
+  elements.signupForm?.addEventListener("input", updateSignupSubmitState);
+  elements.signupForm?.addEventListener("change", updateSignupSubmitState);
+  updateSignupSubmitState();
 }
 
 async function initializeSupabaseAuth() {
@@ -231,7 +290,78 @@ function setAuthView(viewName) {
   elements.authPanels.forEach((panel) => {
     panel.classList.toggle("active", panel.dataset.authViewPanel === viewName);
   });
+  updateSignupSubmitState();
+  if (viewName === "signup") {
+    refreshSignupAvailabilityState();
+  }
   clearAuthMessages();
+}
+
+function refreshSignupAvailabilityState() {
+  const usernameField = elements.signupForm?.elements.userId;
+  if (!usernameField) {
+    return;
+  }
+
+  const normalizedUsername = normalizeUsernameInput(usernameField.value);
+  if (usernameField.value !== normalizedUsername) {
+    usernameField.value = normalizedUsername;
+  }
+
+  if (!normalizedUsername) {
+    updateSignupSubmitState();
+    return;
+  }
+
+  if (state.signupUsernameCheck.username !== normalizedUsername || !state.signupUsernameCheck.available) {
+    queueUsernameAvailabilityCheck(normalizedUsername, true);
+    return;
+  }
+
+  updateSignupSubmitState();
+}
+
+function queueUsernameAvailabilityCheck(username, immediate = false) {
+  const normalizedUsername = normalizeUsernameInput(username);
+  state.signupUsernameCheck.username = normalizedUsername;
+  state.signupUsernameCheck.available = false;
+  state.signupUsernameCheck.checking = false;
+
+  if (state.signupUsernameCheck.timerId) {
+    window.clearTimeout(state.signupUsernameCheck.timerId);
+    state.signupUsernameCheck.timerId = null;
+  }
+
+  if (!normalizedUsername) {
+    renderSignupUsernameStatus("");
+    updateSignupSubmitState();
+    return;
+  }
+
+  if (normalizedUsername.length < 3) {
+    renderSignupUsernameStatus("Username must be at least 3 characters.", "unavailable");
+    updateSignupSubmitState();
+    return;
+  }
+
+  state.signupUsernameCheck.checking = true;
+  renderSignupUsernameStatus("Checking username availability...", "checking");
+  updateSignupSubmitState();
+  const runCheck = () => {
+    checkUsernameAvailability(normalizedUsername).catch((error) => {
+      state.signupUsernameCheck.checking = false;
+      state.signupUsernameCheck.available = false;
+      renderSignupUsernameStatus(error.message || "Could not verify username right now.", "unavailable");
+      updateSignupSubmitState();
+    });
+  };
+
+  if (immediate) {
+    runCheck();
+    return;
+  }
+
+  state.signupUsernameCheck.timerId = window.setTimeout(runCheck, 300);
 }
 
 async function handleLogin(event) {
@@ -278,76 +408,72 @@ async function handleLogin(event) {
 async function handleSignup(event) {
   event.preventDefault();
   clearAuthMessages();
+  if (state.signupSubmitting) {
+    return;
+  }
 
   if (!supabaseClient) {
     elements.loginError.textContent = "Supabase is not configured yet. Add your project URL and anon key first.";
     return;
   }
 
-  const name = elements.signupForm.elements.name.value.trim();
-  const userId = elements.signupForm.elements.userId.value.trim();
-  const companyName = elements.signupForm.elements.companyName.value.trim();
-  const businessGst = elements.signupForm.elements.businessGst.value.trim();
-  const businessPhone = elements.signupForm.elements.businessPhone.value.trim();
-  const businessAddress = elements.signupForm.elements.businessAddress.value.trim();
-  const bankNotes = elements.signupForm.elements.bankNotes.value.trim();
+  const userId = normalizeUsernameInput(elements.signupForm.elements.userId.value);
   const email = elements.signupForm.elements.email.value.trim().toLowerCase();
   const password = elements.signupForm.elements.password.value;
-  const confirmPassword = elements.signupForm.elements.confirmPassword.value;
+  elements.signupForm.elements.userId.value = userId;
+  updateSignupSubmitState();
 
   if (password.length < 6) {
     elements.loginError.textContent = "Password must be at least 6 characters.";
     return;
   }
 
-  if (password !== confirmPassword) {
-    elements.loginError.textContent = "Password and confirm password do not match.";
+  if (!userId) {
+    elements.loginError.textContent = "Username is required.";
     return;
   }
-
-  const signUpOptions = {
-    email,
-    password,
-    options: {
-      data: {
-        name,
-        user_id: userId,
-        company_name: companyName,
-        business_gst: businessGst,
-        business_phone: businessPhone,
-        business_address: businessAddress,
-        bank_notes: bankNotes
-      }
-    }
-  };
 
   const redirectUrl = buildAuthRedirectUrl();
-  if (redirectUrl) {
-    signUpOptions.options.emailRedirectTo = redirectUrl;
-  }
+  try {
+    state.signupSubmitting = true;
+    updateSignupSubmitState();
+    const availability = await checkUsernameAvailability(userId);
+    if (!availability.available) {
+      elements.loginError.textContent = "That username is already taken. Please choose another one.";
+      state.signupSubmitting = false;
+      updateSignupSubmitState();
+      return;
+    }
 
-  const { data, error } = await supabaseClient.auth.signUp(signUpOptions);
-  if (error) {
+    await publicBackendRequest("/api/auth/signup", {
+      method: "POST",
+      body: {
+        email,
+        password,
+        userId,
+        emailRedirectTo: redirectUrl || null
+      }
+    });
+  } catch (error) {
     elements.loginError.textContent = error.message || "Unable to create account.";
+    state.signupSubmitting = false;
+    updateSignupSubmitState();
     return;
   }
 
-  if (data?.user) {
-    state.businessProfile = normalizeBusinessProfile({
-      ...state.businessProfile,
-      businessName: companyName,
-      businessGst,
-      businessPhone,
-      address: businessAddress,
-      businessEmail: email,
-      bankNotes
-    });
-    await syncUserProfile(data.user);
-  }
-
+  state.signupSubmitting = false;
+  state.signupUsernameCheck = {
+    username: "",
+    available: false,
+    checking: false,
+    requestId: state.signupUsernameCheck.requestId,
+    timerId: null
+  };
+  renderSignupUsernameStatus("");
+  updateSignupSubmitState();
   setAuthView("login");
   elements.signupForm.reset();
-  elements.authMessage.textContent = `Signup successful for ${email}. Check your email and click the confirmation link, then come back here to log in.`;
+  elements.authMessage.textContent = `Signup successful for ${email}. Check your email, open the confirmation link, and then finish company onboarding before entering the dashboard.`;
 }
 
 async function handlePasswordReset(event) {
@@ -555,6 +681,7 @@ async function handleLogout() {
 function showLogin() {
   elements.loginScreen.classList.remove("is-hidden");
   elements.appShell.classList.add("is-hidden");
+  state.onboardingRequired = false;
 }
 
 function showApp() {
@@ -581,8 +708,20 @@ function bindCompanyProfileActions() {
 }
 
 function switchTab(targetId) {
+  if (state.onboardingRequired && targetId !== "company") {
+    elements.authMessage.textContent = "Complete company onboarding before accessing billing tabs.";
+    targetId = "company";
+  }
+
   elements.tabs.forEach((button) => {
     button.classList.toggle("active", button.dataset.tab === targetId);
+    if (state.onboardingRequired && button.dataset.tab !== "company") {
+      button.setAttribute("aria-disabled", "true");
+      button.title = "Complete company onboarding first.";
+    } else {
+      button.removeAttribute("aria-disabled");
+      button.removeAttribute("title");
+    }
   });
   elements.panels.forEach((panel) => {
     panel.classList.toggle("active", panel.id === targetId);
@@ -695,6 +834,10 @@ function normalizeBusinessProfile(profile = {}) {
   };
 }
 
+function hasCompletedOnboarding() {
+  return Boolean(state.businessProfile.businessName?.trim());
+}
+
 function renderCompanyProfile() {
   const profile = state.businessProfile;
   elements.heroBusinessName.textContent = profile.businessName || "Your Company Workspace";
@@ -752,13 +895,20 @@ async function handleSaveCompanyProfile(event) {
   try {
     state.businessProfile = profile;
     await saveBusinessProfile();
+    await loadWorkspaceData();
+    state.onboardingRequired = !hasCompletedOnboarding();
     renderCompanyProfile();
     updateTotals();
     renderPreview(createDraftFromForm());
     elements.companyProfileMessage.textContent = `${profile.businessName} saved successfully.`;
+    if (!state.onboardingRequired) {
+      elements.authMessage.textContent = "Company onboarding complete. Your dashboard and billing tabs are now unlocked.";
+      switchTab("dashboard");
+    }
   } catch (error) {
     console.error("Failed to save company profile.", error);
     elements.companyProfileMessage.textContent = `Failed to save company profile. ${error.message || "Please try again."}`;
+    window.alert(`Failed to save company profile. ${error.message || "Please try again."}`);
   }
 }
 
@@ -1289,7 +1439,256 @@ function createSessionFromSupabaseUser(user) {
 }
 
 function canUseSupabaseStorage() {
-  return Boolean(supabaseClient && state.currentUser?.id);
+  return Boolean(supabaseClient && state.currentUser?.id && BACKEND_URL);
+}
+
+function normalizeUsernameInput(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/[^a-z0-9_.-]/g, "");
+}
+
+function renderSignupUsernameStatus(message, tone = "") {
+  if (!elements.signupUserIdStatus) {
+    return;
+  }
+
+  elements.signupUserIdStatus.textContent = message;
+  elements.signupUserIdStatus.classList.remove("available", "unavailable", "checking");
+  if (tone) {
+    elements.signupUserIdStatus.classList.add(tone);
+  }
+  elements.signupUserIdTick?.classList.toggle("visible", tone === "available");
+}
+
+function updateSignupSubmitState() {
+  if (!elements.signupSubmitButton || !elements.signupForm) {
+    return;
+  }
+
+  const username = normalizeUsernameInput(elements.signupForm.elements.userId.value);
+  const email = elements.signupForm.elements.email.value.trim();
+  const password = elements.signupForm.elements.password.value;
+  const usernameConfirmed =
+    state.signupUsernameCheck.available &&
+    state.signupUsernameCheck.username === username &&
+    !state.signupUsernameCheck.checking;
+  const emailValid = Boolean(email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email));
+  const passwordValid = password.length >= 6;
+  const formReady = usernameConfirmed && emailValid && passwordValid && !state.signupSubmitting;
+
+  elements.signupSubmitButton.disabled = !formReady;
+  elements.signupSubmitButton.textContent = state.signupSubmitting ? "Creating Account..." : "Create Account";
+
+  if (!elements.signupSubmitHint) {
+    return;
+  }
+
+  elements.signupSubmitHint.classList.remove("ready", "waiting");
+  if (state.signupSubmitting) {
+    elements.signupSubmitHint.textContent = "Creating your account and requesting confirmation email...";
+    elements.signupSubmitHint.classList.add("waiting");
+    return;
+  }
+
+  if (formReady) {
+    elements.signupSubmitHint.textContent = "Everything looks good. You can create the account now.";
+    elements.signupSubmitHint.classList.add("ready");
+    return;
+  }
+
+  if (!username) {
+    elements.signupSubmitHint.textContent = "Enter a username to start the availability check.";
+  } else if (state.signupUsernameCheck.checking) {
+    elements.signupSubmitHint.textContent = "Waiting for username availability confirmation...";
+  } else if (!usernameConfirmed) {
+    elements.signupSubmitHint.textContent = "Choose a username that shows the green available check.";
+  } else if (!emailValid) {
+    elements.signupSubmitHint.textContent = "Enter a valid email address.";
+  } else if (!passwordValid) {
+    elements.signupSubmitHint.textContent = "Password must be at least 6 characters.";
+  } else {
+    elements.signupSubmitHint.textContent = "Complete the fields above to continue.";
+  }
+  elements.signupSubmitHint.classList.add("waiting");
+}
+
+async function publicBackendRequest(pathname, options = {}) {
+  let response;
+
+  try {
+    response = await fetch(`${BACKEND_URL}${pathname}`, {
+      method: options.method || "GET",
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.headers || {})
+      },
+      body: options.body ? JSON.stringify(options.body) : undefined
+    });
+  } catch {
+    throw new Error(`Cannot reach backend at ${BACKEND_URL}. Start the backend server and try again.`);
+  }
+
+  if (!response.ok) {
+    let message = `Backend request failed with ${response.status}.`;
+    try {
+      const payload = await response.json();
+      message = payload.error || payload.message || message;
+    } catch {
+      // Keep fallback message.
+    }
+    throw new Error(message);
+  }
+
+  if (response.status === 204) {
+    return null;
+  }
+
+  return response.json();
+}
+
+async function checkUsernameAvailability(username) {
+  const normalizedUsername = normalizeUsernameInput(username);
+  if (!normalizedUsername) {
+    return { username: "", available: false };
+  }
+
+  const requestId = state.signupUsernameCheck.requestId + 1;
+  state.signupUsernameCheck.requestId = requestId;
+
+  const result = await publicBackendRequest(`/api/auth/check-username?username=${encodeURIComponent(normalizedUsername)}`);
+  if (requestId !== state.signupUsernameCheck.requestId) {
+    return result;
+  }
+
+  state.signupUsernameCheck.username = result.username;
+  state.signupUsernameCheck.available = Boolean(result.available);
+  state.signupUsernameCheck.checking = false;
+  renderSignupUsernameStatus(
+    result.available ? `Username available. ${result.username} is yours to use.` : `Username unavailable. ${result.username} is already taken.`,
+    result.available ? "available" : "unavailable"
+  );
+  updateSignupSubmitState();
+  return result;
+}
+
+async function getAccessToken() {
+  if (!supabaseClient) {
+    throw new Error("Supabase auth client is not available.");
+  }
+
+  const { data, error } = await supabaseClient.auth.getSession();
+  if (error) {
+    throw error;
+  }
+
+  const accessToken = data?.session?.access_token;
+  if (!accessToken) {
+    throw new Error("Your session expired. Please log in again.");
+  }
+
+  return accessToken;
+}
+
+async function backendRequest(pathname, options = {}) {
+  const accessToken = await getAccessToken();
+  let response;
+
+  try {
+    response = await fetch(`${BACKEND_URL}${pathname}`, {
+      method: options.method || "GET",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        ...(options.headers || {})
+      },
+      body: options.body ? JSON.stringify(options.body) : undefined
+    });
+  } catch {
+    throw new Error(`Cannot reach backend at ${BACKEND_URL}. Start the backend server and try again.`);
+  }
+
+  if (!response.ok) {
+    let message = `Backend request failed with ${response.status}.`;
+    try {
+      const payload = await response.json();
+      message = payload.error || payload.message || message;
+    } catch {
+      // Ignore JSON parse errors and keep the fallback message.
+    }
+    throw new Error(message);
+  }
+
+  if (response.status === 204) {
+    return null;
+  }
+
+  return response.json();
+}
+
+function buildWorkspacePayload() {
+  return {
+    profile: {
+      user_id: state.currentUser?.userId || "user",
+      full_name: state.currentUser?.name || "User",
+      email: state.currentUser?.email || "",
+      company_name: state.currentUser?.companyName || state.businessProfile.businessName,
+      business_name: state.businessProfile.businessName,
+      business_email: state.businessProfile.businessEmail,
+      business_phone: state.businessProfile.businessPhone,
+      business_gst: state.businessProfile.businessGst,
+      business_address: state.businessProfile.address,
+      bank_name: state.businessProfile.bankName,
+      account_holder: state.businessProfile.accountHolder,
+      account_number: state.businessProfile.accountNumber,
+      ifsc_code: state.businessProfile.ifscCode,
+      upi_id: state.businessProfile.upiId,
+      default_gst: state.businessProfile.defaultGst,
+      bank_notes: state.businessProfile.bankNotes
+    },
+    items: state.items.map(mapItemToSupabaseRow),
+    invoices: state.invoices.map(mapInvoiceToSupabaseRow),
+    counters: {
+      invoice_counter: state.nextInvoiceCounter,
+      proforma_counter: state.proformaCounter
+    }
+  };
+}
+
+async function saveWorkspaceData() {
+  const workspace = await backendRequest("/api/workspace", {
+    method: "PUT",
+    body: buildWorkspacePayload()
+  });
+  applyWorkspaceResponse(workspace);
+  await cacheWorkspaceLocally();
+}
+
+function applyWorkspaceResponse(workspace) {
+  if (!workspace) {
+    return;
+  }
+
+  const profile = workspace.profile || null;
+  if (profile) {
+    state.currentUser = {
+      ...state.currentUser,
+      userId: profile.user_id || state.currentUser?.userId,
+      name: profile.full_name || state.currentUser?.name,
+      email: profile.email || state.currentUser?.email,
+      companyName: profile.company_name || state.currentUser?.companyName
+    };
+    saveSession(state.currentUser);
+  }
+
+  state.businessProfile = mapBusinessProfileFromProfile(profile);
+  state.users = buildUserState(profile);
+  state.items = Array.isArray(workspace.items) ? workspace.items.map(mapItemFromSupabaseRow) : [];
+  state.invoices = Array.isArray(workspace.invoices) ? workspace.invoices.map(mapInvoiceFromSupabaseRow) : [];
+  state.nextInvoiceCounter = Math.max(1, Number(workspace.counters?.invoice_counter) || 1);
+  state.proformaCounter = Math.max(1, Number(workspace.counters?.proforma_counter) || 1);
 }
 
 function createCurrentUserRecord(overrides = {}) {
@@ -1497,8 +1896,8 @@ async function cacheWorkspaceLocally() {
 }
 
 async function saveBusinessProfile() {
-  if (!state.currentUser?.id || !supabaseClient) {
-    return;
+  if (!canUseSupabaseStorage()) {
+    throw new Error("Backend workspace is not available.");
   }
 
   state.currentUser = {
@@ -1508,101 +1907,13 @@ async function saveBusinessProfile() {
   saveSession(state.currentUser);
   state.users = [createCurrentUserRecord()];
   await saveUsers();
-
-  const sessionUser = createSessionFromSupabaseUser({
-    id: state.currentUser.id,
-    email: state.currentUser.email,
-    user_metadata: {
-      user_id: state.currentUser.userId,
-      name: state.currentUser.name,
-      company_name: state.currentUser.companyName
-    }
-  });
-
-  const { error } = await supabaseClient
-    .from("profiles")
-    .upsert({
-      id: state.currentUser.id,
-      user_id: sessionUser.userId,
-      full_name: sessionUser.name,
-      email: sessionUser.email,
-      company_name: sessionUser.companyName || state.businessProfile.businessName,
-      business_name: state.businessProfile.businessName,
-      business_email: state.businessProfile.businessEmail,
-      business_phone: state.businessProfile.businessPhone,
-      business_gst: state.businessProfile.businessGst,
-      business_address: state.businessProfile.address,
-      bank_name: state.businessProfile.bankName,
-      account_holder: state.businessProfile.accountHolder,
-      account_number: state.businessProfile.accountNumber,
-      ifsc_code: state.businessProfile.ifscCode,
-      upi_id: state.businessProfile.upiId,
-      default_gst: state.businessProfile.defaultGst,
-      bank_notes: state.businessProfile.bankNotes,
-      updated_at: new Date().toISOString()
-    }, {
-      onConflict: "id"
-    });
-
-  if (error) {
-    throw error;
-  }
-}
-
-async function replaceSupabaseRows(tableName, rows) {
-  const { data: existingRows, error: selectError } = await supabaseClient
-    .from(tableName)
-    .select("id")
-    .eq("user_id", state.currentUser.id);
-
-  if (selectError) {
-    throw selectError;
-  }
-
-  const existingIds = (existingRows || []).map((row) => row.id);
-  const incomingIds = rows.map((row) => row.id);
-  const idsToDelete = existingIds.filter((id) => !incomingIds.includes(id));
-
-  if (idsToDelete.length) {
-    const { error: deleteError } = await supabaseClient
-      .from(tableName)
-      .delete()
-      .eq("user_id", state.currentUser.id)
-      .in("id", idsToDelete);
-
-    if (deleteError) {
-      throw deleteError;
-    }
-  }
-
-  if (!rows.length) {
-    return;
-  }
-
-  const { error: upsertError } = await supabaseClient
-    .from(tableName)
-    .upsert(rows, { onConflict: "id" });
-
-  if (upsertError) {
-    throw upsertError;
-  }
+  await saveWorkspaceData();
 }
 
 async function saveUserCounters() {
   if (canUseSupabaseStorage()) {
-    const { error } = await supabaseClient
-      .from("user_counters")
-      .upsert({
-        user_id: state.currentUser.id,
-        invoice_counter: state.nextInvoiceCounter,
-        proforma_counter: state.proformaCounter
-      }, {
-        onConflict: "user_id"
-      });
-
-    if (error) {
-      throw error;
-    }
+    await saveWorkspaceData();
+    return;
   }
 
   await setMetaValue("invoiceCounter", state.nextInvoiceCounter);
@@ -1615,53 +1926,21 @@ async function loadWorkspaceData() {
   }
 
   const localSnapshot = createWorkspaceSnapshot();
-  const [{ data: profile }, { data: items, error: itemsError }, { data: invoices, error: invoicesError }, { data: counters, error: countersError }] = await Promise.all([
-    supabaseClient.from("profiles").select("*").eq("id", state.currentUser.id).maybeSingle(),
-    supabaseClient.from("items").select("*").eq("user_id", state.currentUser.id).order("name"),
-    supabaseClient.from("invoices").select("*").eq("user_id", state.currentUser.id).order("created_at", { ascending: false }),
-    supabaseClient.from("user_counters").select("*").eq("user_id", state.currentUser.id).maybeSingle()
-  ]);
+  const workspace = await backendRequest("/api/workspace");
+  applyWorkspaceResponse(workspace);
 
-  if (itemsError || invoicesError || countersError) {
-    throw itemsError || invoicesError || countersError;
-  }
-
-  if (profile) {
-    state.currentUser = {
-      ...state.currentUser,
-      userId: profile.user_id || state.currentUser.userId,
-      name: profile.full_name || state.currentUser.name,
-      email: profile.email || state.currentUser.email,
-      companyName: profile.company_name || state.currentUser.companyName
-    };
-    saveSession(state.currentUser);
-  }
-  state.businessProfile = mapBusinessProfileFromProfile(profile);
-
-  const remoteWorkspace = {
-    invoices: (invoices || []).map(mapInvoiceFromSupabaseRow),
-    items: (items || []).map(mapItemFromSupabaseRow),
-    nextInvoiceCounter: Math.max(1, Number(counters?.invoice_counter) || 1),
-    proformaCounter: Math.max(1, Number(counters?.proforma_counter) || 1)
-  };
-
-  if (shouldSeedSupabaseWorkspace(localSnapshot, remoteWorkspace)) {
+  if (shouldSeedSupabaseWorkspace(localSnapshot, {
+    invoices: state.invoices,
+    items: state.items
+  })) {
     state.invoices = localSnapshot.invoices.map(normalizeInvoiceRecord);
     state.items = localSnapshot.items.map(normalizeItemRecord);
-    state.users = buildUserState(profile);
     state.nextInvoiceCounter = Math.max(1, Number(localSnapshot.nextInvoiceCounter) || 1);
     state.proformaCounter = Math.max(1, Number(localSnapshot.proformaCounter) || 1);
-    await saveInvoices();
-    await saveItems();
-    await saveUserCounters();
+    await saveWorkspaceData();
     return;
   }
 
-  state.invoices = remoteWorkspace.invoices;
-  state.items = remoteWorkspace.items;
-  state.users = buildUserState(profile);
-  state.nextInvoiceCounter = remoteWorkspace.nextInvoiceCounter;
-  state.proformaCounter = remoteWorkspace.proformaCounter;
   await cacheWorkspaceLocally();
 }
 
@@ -1678,9 +1957,13 @@ async function applyAuthenticatedUser(user) {
   updateSessionLabel();
   showApp();
   initializeBillingApp();
-  if (!state.businessProfile.businessName) {
-    elements.authMessage.textContent = "Finish your company setup to personalize invoices and inventory for this account.";
+  state.onboardingRequired = !hasCompletedOnboarding();
+  if (state.onboardingRequired) {
+    elements.authMessage.textContent = "Email confirmed. Finish company onboarding to unlock the dashboard, bills, and inventory for this account.";
     switchTab("company");
+    elements.companyProfileForm?.elements.businessName?.focus();
+  } else {
+    switchTab("dashboard");
   }
 }
 
@@ -1711,44 +1994,12 @@ async function syncUserProfile(user) {
   }
 
   await saveUsers();
-
-  if (!supabaseClient) {
-    return;
-  }
-
-  const { error } = await supabaseClient
-    .from("profiles")
-    .upsert({
-      id: user.id,
-      user_id: sessionUser.userId,
-      full_name: sessionUser.name,
-      email: sessionUser.email,
-      company_name: sessionUser.companyName,
-      business_name: nextBusinessProfile.businessName,
-      business_email: nextBusinessProfile.businessEmail,
-      business_phone: nextBusinessProfile.businessPhone,
-      business_gst: nextBusinessProfile.businessGst,
-      business_address: nextBusinessProfile.address,
-      bank_name: nextBusinessProfile.bankName,
-      account_holder: nextBusinessProfile.accountHolder,
-      account_number: nextBusinessProfile.accountNumber,
-      ifsc_code: nextBusinessProfile.ifscCode,
-      upi_id: nextBusinessProfile.upiId,
-      default_gst: nextBusinessProfile.defaultGst,
-      bank_notes: nextBusinessProfile.bankNotes,
-      updated_at: new Date().toISOString()
-    }, {
-      onConflict: "id"
-    });
-
-  if (error) {
-    console.warn("Profile sync skipped.", error.message);
-  }
 }
 
 async function saveInvoices() {
   if (canUseSupabaseStorage()) {
-    await replaceSupabaseRows("invoices", state.invoices.map(mapInvoiceToSupabaseRow));
+    await saveWorkspaceData();
+    return;
   }
   await replaceStoreContents(INVOICES_STORE, state.invoices);
 }
@@ -1781,7 +2032,8 @@ async function saveUsers() {
 
 async function saveItems() {
   if (canUseSupabaseStorage()) {
-    await replaceSupabaseRows("items", state.items.map(mapItemToSupabaseRow));
+    await saveWorkspaceData();
+    return;
   }
   await replaceStoreContents(ITEMS_STORE, state.items);
 }

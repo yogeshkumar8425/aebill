@@ -3,10 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>Billing Workspace</title>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=20260420c">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabase-config.js"></script>
+  <script src="supabase-config.js?v=20260420c"></script>
 </head>
 <body>
   <section class="login-screen" id="loginScreen">
@@ -27,17 +30,18 @@
       </form>
 
       <form id="signupForm" class="login-form auth-view" data-auth-view-panel="signup">
-        <label>Full Name<input type="text" name="name" placeholder="Enter full name" required></label>
-        <label>User ID<input type="text" name="userId" placeholder="Choose a user ID" required></label>
-        <label>Company Name<input type="text" name="companyName" placeholder="Enter company name" required></label>
-        <label>GSTIN<input type="text" name="businessGst" placeholder="Enter GSTIN"></label>
-        <label>Phone Number<input type="text" name="businessPhone" placeholder="Enter phone number"></label>
-        <label class="full-span">Address<textarea name="businessAddress" rows="3" placeholder="Enter business address"></textarea></label>
-        <label class="full-span">Bank Details / Payment Notes<textarea name="bankNotes" rows="5" placeholder="Enter bank name, account number, IFSC, UPI, or payment instructions"></textarea></label>
+        <label class="signup-username-field">
+          <span>Username</span>
+          <span class="signup-username-input-wrap">
+            <input type="text" name="userId" placeholder="Choose a unique username" required>
+            <span id="signupUserIdTick" class="signup-username-tick" aria-hidden="true">&#10003;</span>
+          </span>
+        </label>
+        <p id="signupUserIdStatus" class="login-hint signup-status"></p>
         <label>Email ID<input type="email" name="email" placeholder="Enter email ID" required></label>
         <label>Password<input type="password" name="password" placeholder="Create password" minlength="6" required></label>
-        <label>Confirm Password<input type="password" name="confirmPassword" placeholder="Confirm password" minlength="6" required></label>
-        <button type="submit" class="primary-button">Create Account</button>
+        <p id="signupSubmitHint" class="login-hint signup-submit-hint"></p>
+        <button type="submit" class="primary-button" id="signupSubmitButton" disabled>Create Account</button>
       </form>
 
       <form id="passwordResetForm" class="login-form auth-view" data-auth-view-panel="reset">
@@ -45,7 +49,7 @@
         <button type="submit" class="secondary-button">Send Reset Email</button>
       </form>
 
-      <p class="login-hint" id="authHint">Email confirmation is handled by Supabase. After confirming your email, return here and log in.</p>
+      <p class="login-hint" id="authHint">Sign up with username, email, and password. After email confirmation, you will complete company onboarding before using the dashboard.</p>
       <p id="authMessage" class="login-hint"></p>
       <p id="loginError" class="login-error"></p>
     </div>
@@ -355,6 +359,6 @@
 
   <datalist id="itemSuggestions"></datalist>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=20260420c"></script>
 </body>
 </html>

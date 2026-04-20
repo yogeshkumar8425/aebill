@@ -105,6 +105,91 @@ button, input, textarea, select { font: inherit; }
   font-weight: 700;
 }
 
+.signup-status {
+  min-height: 20px;
+  margin-top: -4px;
+}
+
+.signup-username-field {
+  display: grid;
+  gap: 8px;
+}
+
+.signup-username-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.signup-username-input-wrap input {
+  width: 100%;
+  padding-right: 46px;
+}
+
+.signup-username-tick {
+  position: absolute;
+  right: 14px;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #1d7a3b;
+  color: white;
+  font-weight: 900;
+  font-size: 0.95rem;
+  opacity: 0;
+  transform: scale(0.82);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  pointer-events: none;
+  box-shadow: 0 6px 16px rgba(29, 122, 59, 0.18);
+}
+
+.signup-username-tick.visible {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.signup-status.available {
+  color: #1d7a3b;
+  font-weight: 700;
+}
+
+.signup-status.unavailable {
+  color: #a12d1f;
+  font-weight: 700;
+}
+
+.signup-status.checking {
+  color: var(--muted);
+}
+
+.signup-submit-hint {
+  min-height: 20px;
+}
+
+.signup-submit-hint.ready {
+  color: #1d7a3b;
+  font-weight: 700;
+}
+
+.signup-submit-hint.waiting {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.primary-button:disabled {
+  opacity: 1;
+  cursor: not-allowed;
+  box-shadow: none;
+  background: #d2c5bb;
+  color: #7e7064;
+  border-color: #d2c5bb;
+  filter: grayscale(0.15);
+}
+
 .app-toolbar {
   margin-bottom: 18px;
   display: flex;
