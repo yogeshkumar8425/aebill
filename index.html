@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>Billing Workspace</title>
+  <link rel="stylesheet" href="styles.css?v=20260420c">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase-config.js?v=20260420c"></script>
+</head>
+<body>
+  <section class="login-screen" id="loginScreen">
+    <div class="login-card">
+      <p class="eyebrow">Secure Access</p>
+      <h1>Access Your Billing Workspace</h1>
+      <p class="hero-copy">Create your account, confirm your email, and sign in to open the billing software.</p>
+      <div class="auth-switcher" role="tablist" aria-label="Authentication forms">
+        <button type="button" class="auth-tab active" data-auth-view="login">Login</button>
+        <button type="button" class="auth-tab" data-auth-view="signup">Sign Up</button>
+        <button type="button" class="auth-tab" data-auth-view="reset">Forgot Password</button>
+      </div>
+
+      <form id="loginForm" class="login-form auth-view active" data-auth-view-panel="login">
+        <label>Email ID<input type="email" name="email" placeholder="Enter your email ID" required></label>
+        <label>Password<input type="password" name="password" placeholder="Enter password" required></label>
+        <button type="submit" class="primary-button">Login</button>
+      </form>
+
+      <form id="signupForm" class="login-form auth-view" data-auth-view-panel="signup">
+        <label class="signup-username-field">
+          <span>Username</span>
+          <span class="signup-username-input-wrap">
+            <input type="text" name="userId" placeholder="Choose a unique username" required>
+            <span id="signupUserIdTick" class="signup-username-tick" aria-hidden="true">&#10003;</span>
+          </span>
+        </label>
+        <p id="signupUserIdStatus" class="login-hint signup-status"></p>
+        <label>Email ID<input type="email" name="email" placeholder="Enter email ID" required></label>
+        <label>Password<input type="password" name="password" placeholder="Create password" minlength="6" required></label>
+        <p id="signupSubmitHint" class="login-hint signup-submit-hint"></p>
+        <button type="submit" class="primary-button" id="signupSubmitButton" disabled>Create Account</button>
+      </form>
+
+      <form id="passwordResetForm" class="login-form auth-view" data-auth-view-panel="reset">
+        <label>Email ID<input type="email" name="email" placeholder="Enter registered email ID" required></label>
+        <button type="submit" class="secondary-button">Send Reset Email</button>
+      </form>
+
+      <p class="login-hint" id="authHint">Sign up with username, email, and password. After email confirmation, you will complete company onboarding before using the dashboard.</p>
+      <p id="authMessage" class="login-hint"></p>
+      <p id="loginError" class="login-error"></p>
+    </div>
+  </section>
+
+  <div class="page-shell is-hidden" id="appShell">
+    <div class="app-toolbar panel">
+      <div>
+        <p class="section-kicker">User Session</p>
+        <strong id="currentUserLabel">Signed in</strong>
+      </div>
+      <button class="secondary-button" id="logoutButton">Logout</button>
+    </div>
+
+    <header class="hero">
+      <div>
+        <p class="eyebrow">GST Bill Workspace</p>
+        <h1 id="heroBusinessName">Your Company Workspace</h1>
+        <p class="hero-copy" id="heroBusinessCopy">Create, manage, preview, and print professional tax invoices with your own business and bank details.</p>
+      </div>
+      <div class="hero-card">
+        <p class="hero-label">Business Details</p>
+        <strong id="heroBusinessGst">GSTIN: Not added yet</strong>
+        <span id="heroBusinessAddress">Add your company address from the Company tab.</span>
+        <span id="heroBusinessEmail">Email: Not added yet</span>
+        <span id="heroBusinessPhone">Phone: Not added yet</span>
+      </div>
+    </header>
+
+    <nav class="tabs" aria-label="Sections">
+      <button class="tab-button active" data-tab="dashboard">Dashboard</button>
+      <button class="tab-button" data-tab="company">Company</button>
+      <button class="tab-button" data-tab="item-store">Item Store</button>
+      <button class="tab-button" data-tab="new-invoice">New Bill</button>
+      <button class="tab-button" data-tab="all-invoices">All Bills</button>
+      <button class="tab-button" data-tab="preview">Preview</button>
+    </nav>
+
+    <main>
+      <section id="dashboard" class="tab-panel active">
+        <div class="stat-grid">
+          <article class="stat-card"><p>Total Value</p><h2 id="totalBilled">Rs 0.00</h2></article>
+          <article class="stat-card"><p>Total Bills</p><h2 id="invoiceCount">0</h2></article>
+          <article class="stat-card"><p>Pending Amount</p><h2 id="pendingAmount">Rs 0.00</h2></article>
+          <article class="stat-card"><p>Paid Bills</p><h2 id="paidCount">0</h2></article>
+          <article class="stat-card"><p>Item Stock</p><h2 id="stockBalance">0</h2></article>
+        </div>
+
+        <div class="panel">
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">Recent Activity</p>
+              <h3>Latest Documents</h3>
+            </div>
+            <button class="secondary-button" id="createFromDashboard">Create Document</button>
+          </div>
+          <div id="recentInvoices" class="table-wrap"></div>
+        </div>
+
+        <div class="panel">
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">Item Summary</p>
+              <h3>Item Stock Summary</h3>
+            </div>
+          </div>
+          <div id="itemSummaryTable" class="table-wrap"></div>
+        </div>
+
+        <div class="panel">
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">Database Backup</p>
+              <h3>Export or Import Data</h3>
+            </div>
+          </div>
+          <p class="panel-copy">Download a full backup of invoices, users, items, and counters, or restore the app from a backup JSON file.</p>
+          <div class="button-row compact-actions">
+            <button type="button" class="secondary-button" id="exportBackupButton">Export Backup</button>
+            <button type="button" class="primary-button" id="importBackupButton">Import Backup</button>
+          </div>
+          <input type="file" id="importBackupInput" accept="application/json" class="is-hidden">
+          <p id="backupMessage" class="panel-copy"></p>
+        </div>
+      </section>
+
+      <section id="new-invoice" class="tab-panel">
+        <form id="invoiceForm">
+          <div class="form-grid">
+            <div class="panel">
+              <div class="section-heading">
+                <div>
+                  <p class="section-kicker">Client</p>
+                  <h3>Customer Details</h3>
+                </div>
+              </div>
+              <div class="field-grid">
+                <label>Client Name<input type="text" name="clientName" required></label>
+                <label>Email<input type="email" name="clientEmail"></label>
+                <label>Phone<input type="text" name="clientPhone"></label>
+                <label>GST Number<input type="text" name="clientGst"></label>
+                <label class="full-span">Address<textarea name="clientAddress" rows="3"></textarea></label>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="section-heading">
+                <div>
+                  <p class="section-kicker">Document</p>
+                  <h3>Document Setup</h3>
+                </div>
+              </div>
+              <div class="field-grid">
+                <label>Document Type
+                  <select name="documentType">
+                    <option value="Bill">Tax Invoice</option>
+                    <option value="Proforma Invoice">Proforma Invoice</option>
+                  </select>
+                </label>
+                <label>Document Number<input type="text" name="invoiceNumber" readonly></label>
+                <label>Document Date<input type="date" name="invoiceDate" required></label>
+                <label>Due Date<input type="date" name="dueDate" required></label>
+                <label>Status
+                  <select name="status">
+                    <option value="Pending">Pending</option>
+                    <option value="Paid">Paid</option>
+                    <option value="Draft">Draft</option>
+                  </select>
+                </label>
+                <label>GST %<input type="number" name="gstPercent" min="0" step="0.01" value="18"></label>
+                <label>Discount %<input type="number" name="discountPercent" min="0" step="0.01" value="0"></label>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="section-heading">
+              <div>
+                <p class="section-kicker">Items</p>
+                <h3>Services / Products</h3>
+              </div>
+              <button type="button" class="secondary-button" id="addItemButton">Add Line Item</button>
+            </div>
+            <div class="table-wrap">
+              <table class="items-table">
+                <thead>
+                  <tr><th>Item Name</th><th>HSN Code</th><th>Qty</th><th>Rate</th><th>Discount %</th><th>Amount</th><th></th></tr>
+                </thead>
+                <tbody id="itemsBody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="form-grid totals-layout">
+            <div class="panel">
+              <div class="section-heading">
+                <div>
+                  <p class="section-kicker">Payment</p>
+                  <h3>Notes</h3>
+                </div>
+              </div>
+              <label>Notes<textarea name="notes" id="notesField" rows="6"></textarea></label>
+            </div>
+
+            <div class="panel">
+              <div class="section-heading">
+                <div>
+                  <p class="section-kicker">Summary</p>
+                  <h3>Totals</h3>
+                </div>
+              </div>
+              <div class="summary-list">
+                <div><span>Subtotal</span><strong id="subtotalValue">Rs 0.00</strong></div>
+                <div><span>Discount</span><strong id="discountValue">Rs 0.00</strong></div>
+                <div><span>Taxable Amount</span><strong id="taxableValue">Rs 0.00</strong></div>
+                <div><span>GST</span><strong id="gstValue">Rs 0.00</strong></div>
+                <div class="grand-total"><span>Grand Total</span><strong id="grandTotalValue">Rs 0.00</strong></div>
+              </div>
+              <div class="button-row">
+                <button type="button" class="secondary-button" id="previewButton">Preview Document</button>
+                <button type="submit" class="primary-button">Save Document</button>
+              </div>
+            </div>
+          </div>
+        </form>
+      </section>
+
+      <section id="company" class="tab-panel">
+        <div class="form-grid">
+          <div class="panel">
+            <div class="section-heading">
+              <div>
+                <p class="section-kicker">Onboarding</p>
+                <h3>Company Details</h3>
+              </div>
+            </div>
+            <p class="panel-copy">Each account gets its own business profile, invoice header, and bank notes. Fill this once and your billing workspace will use it everywhere.</p>
+            <form id="companyProfileForm">
+              <div class="field-grid">
+                <label>Company Name<input type="text" name="businessName" placeholder="Enter company name" required></label>
+                <label>GSTIN<input type="text" name="businessGst" placeholder="Enter GSTIN"></label>
+                <label>Email<input type="email" name="businessEmail" placeholder="Enter business email"></label>
+                <label>Phone<input type="text" name="businessPhone" placeholder="Enter business phone"></label>
+                <label class="full-span">Address<textarea name="businessAddress" rows="3" placeholder="Enter company address"></textarea></label>
+                <label>Bank Name<input type="text" name="bankName" placeholder="Enter bank name"></label>
+                <label>Account Holder<input type="text" name="accountHolder" placeholder="Enter account holder name"></label>
+                <label>Account Number<input type="text" name="accountNumber" placeholder="Enter account number"></label>
+                <label>IFSC Code<input type="text" name="ifscCode" placeholder="Enter IFSC code"></label>
+                <label>UPI ID<input type="text" name="upiId" placeholder="Enter UPI ID"></label>
+                <label class="full-span">Bank / Payment Notes<textarea name="bankNotes" rows="5" placeholder="Enter payment instructions and thank-you note"></textarea></label>
+              </div>
+              <div class="button-row compact-actions">
+                <button type="submit" class="primary-button">Save Company</button>
+                <button type="button" class="secondary-button" id="resetCompanyProfileForm">Reset</button>
+              </div>
+            </form>
+            <p id="companyProfileMessage" class="panel-copy"></p>
+          </div>
+
+          <div class="panel">
+            <div class="section-heading">
+              <div>
+                <p class="section-kicker">Current Profile</p>
+                <h3>Live Business Snapshot</h3>
+              </div>
+            </div>
+            <div id="companyProfileSummary" class="table-wrap"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="item-store" class="tab-panel">
+        <div class="form-grid">
+          <div class="panel">
+            <div class="section-heading">
+              <div>
+                <p class="section-kicker">Inventory</p>
+                <h3>Add or Update Item</h3>
+              </div>
+            </div>
+            <form id="itemStoreForm">
+              <input type="hidden" name="itemId">
+              <div class="field-grid">
+                <label>Item Name<input type="text" name="name" placeholder="Enter item name" required></label>
+                <label>HSN Code<input type="text" name="hsnCode" placeholder="Enter HSN code"></label>
+                <label>Default Rate<input type="number" name="rate" min="0" step="0.01" value="0" required></label>
+                <label>Stock Qty<input type="number" name="stockQty" min="0" step="0.01" value="0" required></label>
+              </div>
+              <div class="button-row compact-actions">
+                <button type="submit" class="primary-button">Save Item</button>
+                <button type="button" class="secondary-button" id="resetItemStoreForm">Reset</button>
+              </div>
+            </form>
+          </div>
+
+          <div class="panel">
+            <div class="section-heading">
+              <div>
+                <p class="section-kicker">Catalog</p>
+                <h3>Saved Items</h3>
+              </div>
+            </div>
+            <div id="itemStoreTable" class="table-wrap"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="all-invoices" class="tab-panel">
+        <div class="panel">
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">Document Register</p>
+              <h3>All Saved Documents</h3>
+            </div>
+            <button class="secondary-button" id="createFromList">Create Document</button>
+          </div>
+          <div id="allInvoicesTable" class="table-wrap"></div>
+        </div>
+      </section>
+
+      <section id="preview" class="tab-panel">
+        <div class="preview-toolbar">
+          <div>
+            <p class="section-kicker">Document Preview</p>
+            <h3>Print-Ready Layout</h3>
+          </div>
+          <button class="primary-button" id="printButton">Print / Save PDF</button>
+        </div>
+        <div class="preview-paper" id="invoicePreview"></div>
+      </section>
+    </main>
+  </div>
+
+  <template id="itemRowTemplate">
+    <tr>
+      <td>
+        <input type="text" name="description" placeholder="Enter item name" list="itemSuggestions" required>
+      </td>
+      <td><input type="text" name="hsnCode" placeholder="Enter HSN code"></td>
+      <td><input type="number" name="quantity" min="0" step="0.01" value="1" required></td>
+      <td><input type="number" name="rate" min="0" step="0.01" value="0" required></td>
+      <td><input type="number" name="itemDiscountPercent" min="0" step="0.01" value="0"></td>
+      <td class="line-amount">Rs 0.00</td>
+      <td><button type="button" class="icon-button remove-item">Remove</button></td>
+    </tr>
+  </template>
+
+  <datalist id="itemSuggestions"></datalist>
+
+  <script src="app.js?v=20260420c"></script>
+</body>
+</html>
