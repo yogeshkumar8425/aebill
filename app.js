@@ -151,7 +151,14 @@ function getBackendBaseUrl() {
   }
 
   if (window.location.protocol === "http:" || window.location.protocol === "https:") {
-    return `${window.location.protocol}//${window.location.hostname}:3000`;
+    const isLocalStaticHost = ["127.0.0.1", "localhost"].includes(window.location.hostname) &&
+      (window.location.port === "5500" || window.location.port === "5501" || window.location.port === "8000");
+
+    if (isLocalStaticHost) {
+      return `${window.location.protocol}//${window.location.hostname}:3000`;
+    }
+
+    return window.location.origin;
   }
 
   return "http://127.0.0.1:3000";

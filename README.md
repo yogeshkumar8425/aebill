@@ -1,8 +1,6 @@
 # AWANSHI ENTERPRISES Invoice Software
 
-This is a browser-based billing app for creating both bills and proforma invoices in a standalone starter version.
-
-A minimal backend scaffold is also included in `backend/` for step-by-step migration to server-side storage.
+This is a browser-based billing app for creating both bills and proforma invoices with Supabase-backed auth, per-user workspaces, and a deployment-ready API layer for Vercel.
 
 ## Features
 
@@ -11,7 +9,7 @@ A minimal backend scaffold is also included in `backend/` for step-by-step migra
 - Bill and proforma invoice form with separate auto-numbering, GST, discount, notes, and item lines
 - Live document preview
 - Browser cache using `IndexedDB` with Supabase as the primary per-account backend
-- Minimal Node.js backend scaffold with file-based API storage
+- Shared backend logic that works locally and through Vercel API routes
 - Supabase client bootstrap with project URL and anon key support
 - Full backup export and import in JSON format
 - Status change, preview, delete, and print support
@@ -19,15 +17,16 @@ A minimal backend scaffold is also included in `backend/` for step-by-step migra
 - Per-account Supabase storage for profiles, items, invoices, and document counters
 - Per-account company onboarding with business details, invoice header, and bank notes
 - Item-wise sell, purchase, and stock summary
+- Username availability checking and backend-enforced uniqueness
 
-## How to Run
+## Local Run
 
 1. Open `index.html` in your web browser.
 2. Add products in the `Item Store` tab to save stock, HSN code, and rate.
 3. Create bills or proforma invoices from the `New Document` tab.
 4. Use the `Preview` tab to print or save PDF.
 5. Use the `Dashboard` backup panel to export or import your full data.
-6. Use the backend in `backend/` when you are ready to move from browser-only storage to server-side APIs.
+6. Run the backend in `backend/` when testing locally.
 
 ## Supabase Setup
 
@@ -57,9 +56,50 @@ Important:
 - Do not place the `service_role` key in browser files.
 - If you open the app directly with `file://`, signup and login still work, but email redirect links are best handled when the app is hosted on a real local/server URL.
 
+## Vercel Deployment
+
+This project is now prepared to deploy frontend and backend together on Vercel.
+
+### What deploys
+
+- Static frontend files from the project root
+- Serverless API route at `api/[...route].js`
+- Shared backend logic from `backend/api-core.js`
+
+### Vercel environment variables
+
+Set these in your Vercel project:
+
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `ALLOWED_ORIGIN`
+
+Recommended `ALLOWED_ORIGIN`:
+
+- your Vercel app URL, for example `https://aebill.vercel.app`
+
+For your current Supabase project, a ready-to-copy setup file is included here:
+
+- [VERCEL_ENV_SETUP.md](C:/Users/ADMIN/OneDrive/Desktop/BILL/VERCEL_ENV_SETUP.md)
+
+### Supabase auth settings
+
+In Supabase `Authentication -> URL Configuration`, set:
+
+- Site URL = your Vercel app URL
+- Redirect URLs = your Vercel app URL
+
+### Frontend backend routing
+
+- Local static dev on `127.0.0.1:5500` still talks to `127.0.0.1:3000`
+- Hosted deployments automatically use same-origin API calls such as `/api/workspace`
+
+That means once deployed, every device will talk to the same public Vercel backend instead of your laptop.
+
 ## Notes
 
 - Data is cached in the browser for convenience, but signed-in users now read and write their workspace data from Supabase.
 - Existing `localStorage` data is migrated into the database on first load.
-- Clearing browser site storage will remove saved data.
-- This version does not require Node.js or installation.
+- Clearing browser site storage removes only the convenience cache, not the Supabase source of truth.
+- Cross-device sync requires the backend to be deployed publicly, not left running only on your local machine.

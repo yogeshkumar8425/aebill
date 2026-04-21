@@ -1,10 +1,11 @@
 # Backend Setup
 
-This backend now acts as the app-data bridge between the frontend and Supabase.
+This backend now acts as the app-data bridge between the frontend and Supabase, both for local Node.js development and Vercel deployment.
 
 ## What It Does
 
 - starts a local HTTP server
+- exposes the same logic through Vercel API routes
 - verifies the signed-in user's Supabase access token
 - reads and writes `profiles`, `user_counters`, `items`, and `invoices`
 - keeps the `service_role` key server-side only
@@ -12,32 +13,40 @@ This backend now acts as the app-data bridge between the frontend and Supabase.
 ## Routes
 
 - `GET /api/health`
+- `GET /api/auth/check-username`
+- `POST /api/auth/signup`
 - `GET /api/workspace`
 - `PUT /api/workspace`
 
 `/api/workspace` is authenticated and expects a Supabase bearer token from the logged-in frontend session.
 
-## Run
+## Local Run
 
 1. Copy `.env.example` to `.env` if you want custom values.
 2. Make sure `.env` contains:
    - `SUPABASE_URL`
    - `SUPABASE_ANON_KEY`
    - `SUPABASE_SERVICE_ROLE_KEY`
+   - `ALLOWED_ORIGIN` if you want to restrict frontend access locally
 3. Open a terminal in `backend`.
 4. Run `node server.js`
 
 Default URL: `http://127.0.0.1:3000`
 
-## Frontend Connection
+## Vercel Deployment
 
-The frontend is configured to call:
+When deployed on Vercel:
 
-- `http://127.0.0.1:3000/api/workspace`
+- `api/[...route].js` becomes the public backend
+- Vercel environment variables replace `backend/.env`
+- the frontend automatically uses same-origin API calls on the deployed domain
 
-If you run the backend on a different host or port, update:
+Set these Vercel environment variables:
 
-- [supabase-config.js](C:/Users/ADMIN/OneDrive/Desktop/BILL/supabase-config.js)
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `ALLOWED_ORIGIN`
 
 ## Supabase Secrets
 
