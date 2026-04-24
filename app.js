@@ -37,6 +37,7 @@ const DEFAULT_BUSINESS_PROFILE = {
 const state = {
   invoices: [],
   previewInvoice: null,
+  editingInvoiceId: "",
   currentUser: loadSession(),
   users: [],
   items: [],
@@ -151,8 +152,7 @@ function getBackendBaseUrl() {
   }
 
   if (window.location.protocol === "http:" || window.location.protocol === "https:") {
-    const isLocalStaticHost = ["127.0.0.1", "localhost"].includes(window.location.hostname) &&
-      (window.location.port === "5500" || window.location.port === "5501" || window.location.port === "8000");
+    const isLocalStaticHost = ["5500", "5501", "8000"].includes(window.location.port);
 
     if (isLocalStaticHost) {
       return `${window.location.protocol}//${window.location.hostname}:3000`;
@@ -186,6 +186,7 @@ async function initializeApp() {
 }
 
 function initializeBillingApp() {
+  syncDocumentCountersWithInvoices();
   if (state.appReady) {
     renderCompanyProfile();
     renderDashboard();
@@ -796,6 +797,8 @@ function bindBackupActions() {
 }
 
 function resetForm() {
+  syncDocumentCountersWithInvoices();
+  state.editingInvoiceId = "";
   elements.form.reset();
   elements.itemsBody.innerHTML = "";
   addItemRow();
@@ -980,23 +983,33 @@ function updateTotals() {
 async function handleSaveInvoice(event) {
   event.preventDefault();
   try {
-    const invoice = createDraftFromForm();
+    const invoice = prepareInvoiceForSave(createDraftFromForm());
     if (!invoice.items.length) {
-      window.alert("Please add at least one item with quantity and rate.");
+      window.alert("Please add at least one line item with a name or amount before saving.");
       return;
     }
 
-    state.invoices.unshift(normalizeInvoiceRecord({
+    const baseInvoice = normalizeInvoiceRecord({
       ...invoice,
-      id: crypto.randomUUID ? crypto.randomUUID() : `invoice-${Date.now()}`,
-      createdAt: new Date().toISOString()
-    }));
-    await saveInvoices();
-    await incrementDocumentCounter(invoice.documentType);
+      id: state.editingInvoiceId || (crypto.randomUUID ? crypto.randomUUID() : `invoice-${Date.now()}`),
+      createdAt: state.editingInvoiceId
+        ? (state.invoices.find((entry) => entry.id === state.editingInvoiceId)?.createdAt || new Date().toISOString())
+        : new Date().toISOString()
+    });
+
+    let savedInvoice = baseInvoice;
+    if (canUseSupabaseStorage()) {
+      savedInvoice = await saveInvoiceToBackend(baseInvoice);
+    } else {
+      upsertInvoiceInState(baseInvoice);
+      await saveInvoices();
+      await incrementDocumentCounter(baseInvoice.documentType);
+    }
+
     renderDashboard();
     renderInvoicesTable();
-    renderPreview(invoice);
-    window.alert(`${getDocumentLabel(invoice.documentType)} ${invoice.invoiceNumber} saved successfully.`);
+    renderPreview(savedInvoice);
+    window.alert(`${getDocumentLabel(savedInvoice.documentType)} ${savedInvoice.invoiceNumber} saved successfully.`);
     resetForm();
     switchTab("all-invoices");
   } catch (error) {
@@ -1014,7 +1027,7 @@ function createDraftFromForm() {
       rate: readNumber(row.querySelector('[name="rate"]').value),
       itemDiscountPercent: readNumber(row.querySelector('[name="itemDiscountPercent"]').value)
     }))
-    .filter((item) => item.description || item.quantity || item.rate)
+    .filter(isMeaningfulLineItem)
     .map((item) => ({
       ...item,
       baseAmount: item.quantity * item.rate,
@@ -1054,6 +1067,35 @@ function createDraftFromForm() {
     gstAmount,
     total
   };
+}
+
+async function saveInvoiceToBackend(invoice) {
+  const response = await backendRequest("/api/invoices/save", {
+    method: "POST",
+    body: {
+      invoice: mapInvoiceToSupabaseRow(invoice)
+    }
+  });
+
+  const savedInvoice = mapInvoiceFromSupabaseRow(response.invoice);
+  state.nextInvoiceCounter = Math.max(1, Number(response.counters?.invoice_counter) || state.nextInvoiceCounter || 1);
+  state.proformaCounter = Math.max(1, Number(response.counters?.proforma_counter) || state.proformaCounter || 1);
+  upsertInvoiceInState(savedInvoice);
+  await cacheWorkspaceLocally();
+  return savedInvoice;
+}
+
+function upsertInvoiceInState(invoice) {
+  const normalizedInvoice = normalizeInvoiceRecord(invoice);
+  const existingIndex = state.invoices.findIndex((entry) => entry.id === normalizedInvoice.id);
+
+  if (existingIndex >= 0) {
+    state.invoices.splice(existingIndex, 1, normalizedInvoice);
+  } else {
+    state.invoices.unshift(normalizedInvoice);
+  }
+
+  state.invoices.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
 }
 
 function renderDashboard() {
@@ -1101,6 +1143,12 @@ function bindInvoiceTableActions(container) {
         renderPreview(invoice);
         switchTab("preview");
       }
+      if (action === "edit") {
+        editInvoice(id);
+      }
+      if (action === "duplicate") {
+        duplicateInvoice(id);
+      }
       if (action === "status") {
         rotateStatus(id);
       }
@@ -1109,6 +1157,57 @@ function bindInvoiceTableActions(container) {
       }
     });
   });
+}
+
+function editInvoice(id) {
+  const invoice = state.invoices.find((entry) => entry.id === id);
+  if (!invoice) {
+    return;
+  }
+
+  populateFormFromInvoice(invoice, { duplicate: false });
+  switchTab("new-invoice");
+}
+
+function duplicateInvoice(id) {
+  const invoice = state.invoices.find((entry) => entry.id === id);
+  if (!invoice) {
+    return;
+  }
+
+  populateFormFromInvoice(invoice, { duplicate: true });
+  switchTab("new-invoice");
+}
+
+function populateFormFromInvoice(invoice, options = {}) {
+  const duplicate = Boolean(options.duplicate);
+  const sourceInvoice = normalizeInvoiceRecord(invoice);
+  const targetDocumentType = sourceInvoice.documentType || "Bill";
+
+  state.editingInvoiceId = duplicate ? "" : sourceInvoice.id;
+  elements.form.elements.documentType.value = targetDocumentType;
+  elements.form.elements.clientName.value = sourceInvoice.clientName || "";
+  elements.form.elements.clientEmail.value = sourceInvoice.clientEmail || "";
+  elements.form.elements.clientPhone.value = sourceInvoice.clientPhone || "";
+  elements.form.elements.clientGst.value = sourceInvoice.clientGst || "";
+  elements.form.elements.clientAddress.value = sourceInvoice.clientAddress || "";
+  elements.form.elements.invoiceDate.value = sourceInvoice.invoiceDate || todayString();
+  elements.form.elements.dueDate.value = sourceInvoice.dueDate || todayString(7);
+  elements.form.elements.status.value = duplicate ? "Pending" : (sourceInvoice.status || "Pending");
+  elements.form.elements.gstPercent.value = sourceInvoice.gstPercent ?? state.businessProfile.defaultGst;
+  elements.form.elements.discountPercent.value = sourceInvoice.discountPercent ?? 0;
+  elements.notesField.value = sourceInvoice.notes || "";
+  elements.form.elements.invoiceNumber.value = duplicate
+    ? getResolvedDocumentNumber(targetDocumentType)
+    : sourceInvoice.invoiceNumber;
+
+  elements.itemsBody.innerHTML = "";
+  (sourceInvoice.items || []).forEach((item) => addItemRow(item));
+  if (!elements.itemsBody.children.length) {
+    addItemRow();
+  }
+
+  updateTotals();
 }
 
 async function rotateStatus(id) {
@@ -1385,6 +1484,8 @@ function createInvoicesTableMarkup(invoices, includeDelete) {
       <td>
         <div class="action-group">
           <button class="secondary-button" data-action="preview" data-id="${invoice.id}">Preview</button>
+          <button class="secondary-button" data-action="edit" data-id="${invoice.id}">Edit</button>
+          <button class="secondary-button" data-action="duplicate" data-id="${invoice.id}">Duplicate</button>
           <button class="secondary-button" data-action="status" data-id="${invoice.id}">Change Status</button>
           ${includeDelete ? `<button class="icon-button" data-action="delete" data-id="${invoice.id}">Delete</button>` : ""}
         </div>
@@ -1697,6 +1798,7 @@ function applyWorkspaceResponse(workspace) {
   state.invoices = Array.isArray(workspace.invoices) ? workspace.invoices.map(mapInvoiceFromSupabaseRow) : [];
   state.nextInvoiceCounter = Math.max(1, Number(workspace.counters?.invoice_counter) || 1);
   state.proformaCounter = Math.max(1, Number(workspace.counters?.proforma_counter) || 1);
+  syncDocumentCountersWithInvoices();
 }
 
 function createCurrentUserRecord(overrides = {}) {
@@ -1815,6 +1917,100 @@ function normalizeInvoiceRecord(invoice) {
     taxableAmount: readNumber(invoice.taxableAmount),
     gstAmount: readNumber(invoice.gstAmount),
     total: readNumber(invoice.total)
+  };
+}
+
+function isMeaningfulLineItem(item) {
+  return Boolean(
+    String(item.description || "").trim() ||
+    String(item.hsnCode || "").trim() ||
+    readNumber(item.rate) > 0 ||
+    readNumber(item.itemDiscountPercent) > 0
+  );
+}
+
+function prepareInvoiceForSave(invoice) {
+  const normalizedInvoice = normalizeInvoiceRecord({
+    ...invoice,
+    clientName: invoice.clientName || "Walk-in Customer"
+  });
+
+  normalizedInvoice.invoiceNumber = getResolvedDocumentNumber(
+    normalizedInvoice.documentType,
+    normalizedInvoice.invoiceNumber
+  );
+
+  return normalizedInvoice;
+}
+
+function getResolvedDocumentNumber(documentType = "Bill", requestedNumber = "") {
+  syncDocumentCountersWithInvoices();
+  const normalizedRequestedNumber = String(requestedNumber || "").trim();
+  const usedNumbers = new Set(
+    state.invoices
+      .filter((invoice) => invoice.documentType === documentType)
+      .map((invoice) => String(invoice.invoiceNumber || "").trim())
+      .filter(Boolean)
+  );
+
+  if (normalizedRequestedNumber && !usedNumbers.has(normalizedRequestedNumber)) {
+    return normalizedRequestedNumber;
+  }
+
+  let candidate = getNextDocumentNumber(documentType);
+  while (usedNumbers.has(candidate)) {
+    if (documentType === "Proforma Invoice") {
+      state.proformaCounter += 1;
+    } else {
+      state.nextInvoiceCounter += 1;
+    }
+    candidate = getNextDocumentNumber(documentType);
+  }
+
+  return candidate;
+}
+
+function syncDocumentCountersWithInvoices() {
+  const inferredCounters = inferDocumentCountersFromInvoices(state.invoices);
+  state.nextInvoiceCounter = Math.max(state.nextInvoiceCounter || 1, inferredCounters.invoiceCounter);
+  state.proformaCounter = Math.max(state.proformaCounter || 1, inferredCounters.proformaCounter);
+}
+
+function inferDocumentCountersFromInvoices(invoices = []) {
+  let invoiceCounter = 1;
+  let proformaCounter = 1;
+
+  invoices.forEach((invoice) => {
+    const sequence = readDocumentSequence(invoice.invoiceNumber);
+    if (!sequence) {
+      return;
+    }
+
+    if (sequence.prefix === "PI") {
+      proformaCounter = Math.max(proformaCounter, sequence.value + 1);
+      return;
+    }
+
+    if (sequence.prefix === "AE") {
+      invoiceCounter = Math.max(invoiceCounter, sequence.value + 1);
+    }
+  });
+
+  return {
+    invoiceCounter,
+    proformaCounter
+  };
+}
+
+function readDocumentSequence(invoiceNumber = "") {
+  const match = String(invoiceNumber || "").trim().toUpperCase().match(/^(AE|PI)-(\d+)$/);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    prefix: match[1],
+    value: Number(match[2]) || 0
   };
 }
 

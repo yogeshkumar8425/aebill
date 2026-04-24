@@ -55,6 +55,14 @@ async function routeRequest(req, res) {
     }
   }
 
+  if (requestUrl.pathname === "/api/invoices/save" && req.method === "POST") {
+    const authUser = await requireAuthenticatedUser(req);
+    const payload = validateInvoiceSavePayload(await readJsonBody(req));
+    const result = await saveInvoiceRecord(authUser, payload.invoice);
+    sendJson(res, 200, result);
+    return;
+  }
+
   sendJson(res, 404, { error: "Route not found" });
 }
 
@@ -223,6 +231,43 @@ async function saveWorkspace(authUser, payload) {
   await replaceUserRows("invoices", authUser.id, payload.invoices);
 
   return loadWorkspace(authUser);
+}
+
+async function saveInvoiceRecord(authUser, invoice) {
+  const normalizedInvoice = sanitizeInvoiceRow(invoice, authUser.id);
+  const existingInvoices = await getRows("invoices", {
+    user_id: `eq.${authUser.id}`,
+    select: "id,document_type,invoice_number,created_at"
+  });
+  const counters = await getSingleRow("user_counters", {
+    user_id: `eq.${authUser.id}`,
+    select: "*"
+  });
+
+  const nextCounters = inferNextCounters(existingInvoices, counters);
+  normalizedInvoice.invoice_number = resolveInvoiceNumber(existingInvoices, normalizedInvoice, nextCounters);
+
+  await upsertSingleRow("invoices", normalizedInvoice, "id");
+
+  await upsertSingleRow("user_counters", {
+    user_id: authUser.id,
+    invoice_counter: nextCounters.invoice_counter,
+    proforma_counter: nextCounters.proforma_counter
+  }, "user_id");
+
+  const savedInvoice = await getSingleRow("invoices", {
+    id: `eq.${normalizedInvoice.id}`,
+    select: "*"
+  });
+
+  return {
+    invoice: savedInvoice,
+    counters: {
+      user_id: authUser.id,
+      invoice_counter: nextCounters.invoice_counter,
+      proforma_counter: nextCounters.proforma_counter
+    }
+  };
 }
 
 async function createPendingSignup(payload) {
@@ -543,6 +588,145 @@ function validateWorkspacePayload(payload) {
       proforma_counter: positiveNumber(counters.proforma_counter, 1)
     }
   };
+}
+
+function validateInvoiceSavePayload(payload) {
+  if (!payload || typeof payload !== "object" || !payload.invoice || typeof payload.invoice !== "object") {
+    throw new Error("Invoice payload must include an invoice object.");
+  }
+
+  return {
+    invoice: payload.invoice
+  };
+}
+
+function sanitizeInvoiceRow(invoice, userId) {
+  const normalizedInvoice = {
+    id: String(invoice.id || "").trim(),
+    user_id: userId,
+    document_type: String(invoice.document_type || "Bill").trim() || "Bill",
+    client_name: String(invoice.client_name || "").trim(),
+    client_email: String(invoice.client_email || "").trim(),
+    client_phone: String(invoice.client_phone || "").trim(),
+    client_gst: String(invoice.client_gst || "").trim(),
+    client_address: String(invoice.client_address || "").trim(),
+    invoice_number: String(invoice.invoice_number || "").trim(),
+    invoice_date: invoice.invoice_date || null,
+    due_date: invoice.due_date || null,
+    status: String(invoice.status || "Pending").trim() || "Pending",
+    gst_percent: numericValue(invoice.gst_percent),
+    discount_percent: numericValue(invoice.discount_percent),
+    notes: String(invoice.notes || ""),
+    items: Array.isArray(invoice.items) ? invoice.items : [],
+    subtotal: numericValue(invoice.subtotal),
+    item_discount_total: numericValue(invoice.item_discount_total),
+    invoice_level_discount_amount: numericValue(invoice.invoice_level_discount_amount),
+    discount_amount: numericValue(invoice.discount_amount),
+    taxable_amount: numericValue(invoice.taxable_amount),
+    gst_amount: numericValue(invoice.gst_amount),
+    total: numericValue(invoice.total),
+    created_at: invoice.created_at || new Date().toISOString()
+  };
+
+  if (!normalizedInvoice.id) {
+    throw new Error("Invoice id is required.");
+  }
+
+  return normalizedInvoice;
+}
+
+function inferNextCounters(invoices = [], counters = null) {
+  let invoiceCounter = positiveNumber(counters?.invoice_counter, 1);
+  let proformaCounter = positiveNumber(counters?.proforma_counter, 1);
+
+  invoices.forEach((invoice) => {
+    const sequence = readDocumentSequence(invoice.invoice_number);
+    if (!sequence) {
+      return;
+    }
+
+    if (sequence.prefix === "PI") {
+      proformaCounter = Math.max(proformaCounter, sequence.value + 1);
+      return;
+    }
+
+    if (sequence.prefix === "AE") {
+      invoiceCounter = Math.max(invoiceCounter, sequence.value + 1);
+    }
+  });
+
+  return {
+    invoice_counter: invoiceCounter,
+    proforma_counter: proformaCounter
+  };
+}
+
+function resolveInvoiceNumber(existingInvoices, invoice, counters) {
+  const normalizedType = invoice.document_type === "Proforma Invoice" ? "Proforma Invoice" : "Bill";
+  const usedNumbers = new Set(
+    existingInvoices
+      .filter((entry) => entry.id !== invoice.id && entry.document_type === normalizedType)
+      .map((entry) => String(entry.invoice_number || "").trim())
+      .filter(Boolean)
+  );
+
+  const requestedNumber = String(invoice.invoice_number || "").trim();
+  if (requestedNumber && !usedNumbers.has(requestedNumber)) {
+    advanceCountersFromInvoiceNumber(normalizedType, requestedNumber, counters);
+    return requestedNumber;
+  }
+
+  let candidate = getNextInvoiceNumber(normalizedType, counters);
+  while (usedNumbers.has(candidate)) {
+    if (normalizedType === "Proforma Invoice") {
+      counters.proforma_counter += 1;
+    } else {
+      counters.invoice_counter += 1;
+    }
+    candidate = getNextInvoiceNumber(normalizedType, counters);
+  }
+
+  advanceCountersFromInvoiceNumber(normalizedType, candidate, counters);
+  return candidate;
+}
+
+function getNextInvoiceNumber(documentType, counters) {
+  if (documentType === "Proforma Invoice") {
+    return `PI-${String(counters.proforma_counter).padStart(4, "0")}`;
+  }
+
+  return `AE-${String(counters.invoice_counter).padStart(4, "0")}`;
+}
+
+function advanceCountersFromInvoiceNumber(documentType, invoiceNumber, counters) {
+  const sequence = readDocumentSequence(invoiceNumber);
+  if (!sequence) {
+    return;
+  }
+
+  if (documentType === "Proforma Invoice" || sequence.prefix === "PI") {
+    counters.proforma_counter = Math.max(counters.proforma_counter, sequence.value + 1);
+    return;
+  }
+
+  counters.invoice_counter = Math.max(counters.invoice_counter, sequence.value + 1);
+}
+
+function readDocumentSequence(invoiceNumber) {
+  const match = String(invoiceNumber || "").trim().toUpperCase().match(/^(AE|PI)-(\d+)$/);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    prefix: match[1],
+    value: Number(match[2]) || 0
+  };
+}
+
+function numericValue(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function validateSignupPayload(payload) {

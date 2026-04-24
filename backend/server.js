@@ -6,6 +6,7 @@ const { routeRequest, sendJson } = require("./api-core");
 loadEnvFile(path.join(__dirname, ".env"));
 
 const PORT = Number(process.env.PORT || 3000);
+const HOST = process.env.HOST || "0.0.0.0";
 
 startServer().catch((error) => {
   console.error("Failed to start backend.", error);
@@ -22,8 +23,8 @@ async function startServer() {
     }
   });
 
-  server.listen(PORT, () => {
-    console.log(`Backend running on http://localhost:${PORT}`);
+  server.listen(PORT, HOST, () => {
+    console.log(`Backend running on http://${HOST}:${PORT}`);
   });
 }
 
