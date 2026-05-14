@@ -91,7 +91,7 @@
     <main>
       <section id="dashboard" class="tab-panel active">
         <div class="stat-grid">
-          <article class="stat-card"><p>Total Value</p><h2 id="totalBilled">Rs 0.00</h2></article>
+          <article class="stat-card"><p>All Item Value</p><h2 id="totalBilled">Rs 0.00</h2></article>
           <article class="stat-card"><p>Total Bills</p><h2 id="invoiceCount">0</h2></article>
           <article class="stat-card"><p>Pending Amount</p><h2 id="pendingAmount">Rs 0.00</h2></article>
           <article class="stat-card"><p>Paid Bills</p><h2 id="paidCount">0</h2></article>
@@ -169,7 +169,7 @@
                     <option value="Proforma Invoice">Proforma Invoice</option>
                   </select>
                 </label>
-                <label>Document Number<input type="text" name="invoiceNumber" readonly></label>
+                <label>Document Number<input type="text" name="invoiceNumber" placeholder="Enter document number"></label>
                 <label>Document Date<input type="date" name="invoiceDate" required></label>
                 <label>Due Date<input type="date" name="dueDate" required></label>
                 <label>Status
@@ -282,7 +282,7 @@
       </section>
 
       <section id="item-store" class="tab-panel">
-        <div class="form-grid">
+        <div class="form-grid item-store-layout">
           <div class="panel">
             <div class="section-heading">
               <div>

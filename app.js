@@ -759,7 +759,7 @@ function bindFormActions() {
       const target = event.target;
       if (target.matches("input, textarea, select")) {
         if (target.name === "documentType") {
-          elements.form.elements.invoiceNumber.value = getNextDocumentNumber(target.value);
+          elements.form.elements.invoiceNumber.value = getResolvedDocumentNumber(target.value, "", state.editingInvoiceId);
         }
         if (target.name === "description") {
           syncItemDetails(target.closest("tr"));
@@ -1002,8 +1002,9 @@ async function handleSaveInvoice(event) {
       savedInvoice = await saveInvoiceToBackend(baseInvoice);
     } else {
       upsertInvoiceInState(baseInvoice);
+      syncDocumentCountersWithInvoices();
       await saveInvoices();
-      await incrementDocumentCounter(baseInvoice.documentType);
+      await saveUserCounters();
     }
 
     renderDashboard();
@@ -1099,14 +1100,14 @@ function upsertInvoiceInState(invoice) {
 }
 
 function renderDashboard() {
-  const totalBilled = state.invoices.reduce((sum, invoice) => sum + invoice.total, 0);
+  const allItemsTotalValue = getAllItemsTotalValue();
   const pendingAmount = state.invoices
     .filter((invoice) => invoice.status === "Pending")
     .reduce((sum, invoice) => sum + invoice.total, 0);
   const paidCount = state.invoices.filter((invoice) => invoice.status === "Paid").length;
   const stockBalance = getItemSummary().reduce((sum, item) => sum + item.currentStock, 0);
 
-  elements.totalBilled.textContent = formatCurrency(totalBilled);
+  elements.totalBilled.textContent = formatCurrency(allItemsTotalValue);
   elements.invoiceCount.textContent = String(state.invoices.length);
   elements.pendingAmount.textContent = formatCurrency(pendingAmount);
   elements.paidCount.textContent = String(paidCount);
@@ -1372,6 +1373,7 @@ function renderItemStore() {
     .map((item) => {
       const soldQty = getSoldQuantity(item.name);
       const currentStock = Number(item.stockQty || 0) - soldQty;
+      const itemTotalValue = currentStock * Number(item.rate || 0);
 
       return `
         <tr>
@@ -1381,6 +1383,7 @@ function renderItemStore() {
           <td>${formatQuantity(item.stockQty)}</td>
           <td>${formatQuantity(soldQty)}</td>
           <td>${formatQuantity(currentStock)}</td>
+          <td>${formatCurrency(itemTotalValue)}</td>
           <td>
             <div class="action-group">
               <button type="button" class="action-link" data-item-action="edit" data-id="${item.id}">Edit</button>
@@ -1395,9 +1398,12 @@ function renderItemStore() {
   elements.itemStoreTable.innerHTML = `
     <table>
       <thead>
-        <tr><th>Item Name</th><th>HSN Code</th><th> Rate</th><th>Stock Qty</th><th>Sold Qty</th><th>Current Stock</th><th>Actions</th></tr>
+        <tr><th>Item Name</th><th>HSN Code</th><th>Rate</th><th>Stock Qty</th><th>Sold Qty</th><th>Current Stock</th><th>Total Value</th><th>Actions</th></tr>
       </thead>
       <tbody>${rows}</tbody>
+      <tfoot>
+        <tr><th colspan="6">All Items Total Value</th><th>${formatCurrency(getAllItemsTotalValue())}</th><th></th></tr>
+      </tfoot>
     </table>
   `;
 }
@@ -1470,6 +1476,14 @@ function getItemSummary() {
   });
 
   return [...summaryMap.values()];
+}
+
+function getAllItemsTotalValue() {
+  return state.items.reduce((sum, item) => {
+    const soldQty = getSoldQuantity(item.name);
+    const currentStock = Number(item.stockQty || 0) - soldQty;
+    return sum + (currentStock * Number(item.rate || 0));
+  }, 0);
 }
 
 function createInvoicesTableMarkup(invoices, includeDelete) {
@@ -1937,18 +1951,19 @@ function prepareInvoiceForSave(invoice) {
 
   normalizedInvoice.invoiceNumber = getResolvedDocumentNumber(
     normalizedInvoice.documentType,
-    normalizedInvoice.invoiceNumber
+    normalizedInvoice.invoiceNumber,
+    state.editingInvoiceId
   );
 
   return normalizedInvoice;
 }
 
-function getResolvedDocumentNumber(documentType = "Bill", requestedNumber = "") {
+function getResolvedDocumentNumber(documentType = "Bill", requestedNumber = "", currentInvoiceId = "") {
   syncDocumentCountersWithInvoices();
   const normalizedRequestedNumber = String(requestedNumber || "").trim();
   const usedNumbers = new Set(
     state.invoices
-      .filter((invoice) => invoice.documentType === documentType)
+      .filter((invoice) => invoice.id !== currentInvoiceId && invoice.documentType === documentType)
       .map((invoice) => String(invoice.invoiceNumber || "").trim())
       .filter(Boolean)
   );
