@@ -190,6 +190,8 @@ async function initializeApp() {
 function initializeBillingApp() {
   syncDocumentCountersWithInvoices();
   if (state.appReady) {
+    resetCompanyProfileForm();
+    resetForm();
     renderCompanyProfile();
     renderDashboard();
     renderItemStore();
