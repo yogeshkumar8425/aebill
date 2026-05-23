@@ -245,7 +245,11 @@ async function saveInvoiceRecord(authUser, invoice) {
   });
 
   const nextCounters = inferNextCounters(existingInvoices, counters);
-  normalizedInvoice.invoice_number = resolveInvoiceNumber(existingInvoices, normalizedInvoice, nextCounters);
+  const isExistingInvoice = existingInvoices.some((entry) => entry.id === normalizedInvoice.id);
+  const shouldUseRequestedNumber = isExistingInvoice || invoice.use_requested_invoice_number === true;
+  normalizedInvoice.invoice_number = resolveInvoiceNumber(existingInvoices, normalizedInvoice, nextCounters, {
+    useRequestedNumber: shouldUseRequestedNumber
+  });
 
   await upsertSingleRow("invoices", normalizedInvoice, "id");
 
@@ -661,7 +665,7 @@ function inferNextCounters(invoices = [], counters = null) {
   };
 }
 
-function resolveInvoiceNumber(existingInvoices, invoice, counters) {
+function resolveInvoiceNumber(existingInvoices, invoice, counters, options = {}) {
   const normalizedType = invoice.document_type === "Proforma Invoice" ? "Proforma Invoice" : "Bill";
   const usedNumbers = new Set(
     existingInvoices
@@ -671,7 +675,7 @@ function resolveInvoiceNumber(existingInvoices, invoice, counters) {
   );
 
   const requestedNumber = String(invoice.invoice_number || "").trim();
-  if (requestedNumber && !usedNumbers.has(requestedNumber)) {
+  if (options.useRequestedNumber && requestedNumber && !usedNumbers.has(requestedNumber)) {
     advanceCountersFromInvoiceNumber(normalizedType, requestedNumber, counters);
     return requestedNumber;
   }

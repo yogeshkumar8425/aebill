@@ -44,6 +44,7 @@ const state = {
   businessProfile: { ...DEFAULT_BUSINESS_PROFILE },
   nextInvoiceCounter: 1,
   proformaCounter: 1,
+  invoiceNumberEditedManually: false,
   db: null,
   appReady: false,
   authSubscription: null,
@@ -760,7 +761,11 @@ function bindFormActions() {
       const target = event.target;
       if (target.matches("input, textarea, select")) {
         if (target.name === "documentType") {
+          state.invoiceNumberEditedManually = false;
           elements.form.elements.invoiceNumber.value = getResolvedDocumentNumber(target.value, "", state.editingInvoiceId);
+        }
+        if (target.name === "invoiceNumber") {
+          state.invoiceNumberEditedManually = true;
         }
         if (target.name === "description") {
           syncItemDetails(target.closest("tr"));
@@ -800,6 +805,7 @@ function bindBackupActions() {
 function resetForm() {
   syncDocumentCountersWithInvoices();
   state.editingInvoiceId = "";
+  state.invoiceNumberEditedManually = false;
   elements.form.reset();
   elements.itemsBody.innerHTML = "";
   addItemRow();
@@ -1072,10 +1078,13 @@ function createDraftFromForm() {
 }
 
 async function saveInvoiceToBackend(invoice) {
+  const invoiceRow = mapInvoiceToSupabaseRow(invoice);
+  invoiceRow.use_requested_invoice_number = Boolean(state.editingInvoiceId || state.invoiceNumberEditedManually);
+
   const response = await backendRequest("/api/invoices/save", {
     method: "POST",
     body: {
-      invoice: mapInvoiceToSupabaseRow(invoice)
+      invoice: invoiceRow
     }
   });
 
@@ -1189,6 +1198,7 @@ function populateFormFromInvoice(invoice, options = {}) {
   const targetDocumentType = sourceInvoice.documentType || "Bill";
 
   state.editingInvoiceId = duplicate ? "" : sourceInvoice.id;
+  state.invoiceNumberEditedManually = false;
   elements.form.elements.documentType.value = targetDocumentType;
   elements.form.elements.clientName.value = sourceInvoice.clientName || "";
   elements.form.elements.clientEmail.value = sourceInvoice.clientEmail || "";
@@ -2171,6 +2181,7 @@ function resetWorkspaceStateForAuthenticatedUser() {
   state.proformaCounter = 1;
   state.editingInvoiceId = "";
   state.previewInvoice = null;
+  state.invoiceNumberEditedManually = false;
   state.users = state.currentUser ? [createCurrentUserRecord()] : [];
 }
 

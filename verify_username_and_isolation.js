@@ -57,10 +57,18 @@ async function main() {
     assert(!workspaceA.invoices.some((invoice) => invoice.invoice_number === "BETA-001"), "User A should not see User B invoices");
     assert(!workspaceB.invoices.some((invoice) => invoice.invoice_number === "ALPHA-001"), "User B should not see User A invoices");
 
+    const autoInvoiceA = await saveAutoNumberedInvoice(tokenA, "AE-0008", "Alpha Auto Item");
+    const autoInvoiceB = await saveAutoNumberedInvoice(tokenB, "AE-0008", "Beta Auto Item");
+    assert(autoInvoiceA.invoice.invoice_number === "AE-0002", "User A should get their own next bill number, not the stale requested number");
+    assert(autoInvoiceB.invoice.invoice_number === "AE-0002", "User B should get their own next bill number, not User A's next number");
+    assert(autoInvoiceA.counters.invoice_counter === 3, "User A counter should advance independently");
+    assert(autoInvoiceB.counters.invoice_counter === 3, "User B counter should advance independently");
+
     console.log(JSON.stringify({
       ok: true,
       usernameAvailability: "passed",
       workspaceIsolation: "passed",
+      perUserBillCounters: "passed",
       checkedUsers: [userA.username, userB.username]
     }, null, 2));
   } finally {
@@ -212,6 +220,49 @@ async function saveWorkspace(token, payload) {
   return authenticatedBackendRequest("/api/workspace", token, {
     method: "PUT",
     body: payload
+  });
+}
+
+async function saveAutoNumberedInvoice(token, requestedInvoiceNumber, itemName) {
+  return authenticatedBackendRequest("/api/invoices/save", token, {
+    method: "POST",
+    body: {
+      invoice: {
+        id: crypto.randomUUID(),
+        user_id: "",
+        document_type: "Bill",
+        client_name: "Counter Test Client",
+        client_email: "counter-client@mailinator.com",
+        client_phone: "7777777777",
+        client_gst: "COUNTERGST123",
+        client_address: "Counter Test Address",
+        invoice_number: requestedInvoiceNumber,
+        invoice_date: "2026-05-23",
+        due_date: "2026-05-30",
+        status: "Pending",
+        gst_percent: 18,
+        discount_percent: 0,
+        notes: "counter isolation check",
+        items: [{
+          description: itemName,
+          hsnCode: "9983",
+          quantity: 1,
+          rate: 100,
+          itemDiscountPercent: 0,
+          baseAmount: 100,
+          amount: 100
+        }],
+        subtotal: 100,
+        item_discount_total: 0,
+        invoice_level_discount_amount: 0,
+        discount_amount: 0,
+        taxable_amount: 100,
+        gst_amount: 18,
+        total: 118,
+        created_at: new Date().toISOString(),
+        use_requested_invoice_number: false
+      }
+    }
   });
 }
 
