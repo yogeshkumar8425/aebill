@@ -107,6 +107,7 @@ const elements = {
   allInvoicesTable: document.getElementById("allInvoicesTable"),
   invoicePreview: document.getElementById("invoicePreview"),
   totalBilled: document.getElementById("totalBilled"),
+  totalBillAmount: document.getElementById("totalBillAmount"),
   invoiceCount: document.getElementById("invoiceCount"),
   pendingAmount: document.getElementById("pendingAmount"),
   paidCount: document.getElementById("paidCount"),
@@ -1101,6 +1102,7 @@ function upsertInvoiceInState(invoice) {
 
 function renderDashboard() {
   const allItemsTotalValue = getAllItemsTotalValue();
+  const totalBillAmount = state.invoices.reduce((sum, invoice) => sum + invoice.total, 0);
   const pendingAmount = state.invoices
     .filter((invoice) => invoice.status === "Pending")
     .reduce((sum, invoice) => sum + invoice.total, 0);
@@ -1108,6 +1110,7 @@ function renderDashboard() {
   const stockBalance = getItemSummary().reduce((sum, item) => sum + item.currentStock, 0);
 
   elements.totalBilled.textContent = formatCurrency(allItemsTotalValue);
+  elements.totalBillAmount.textContent = formatCurrency(totalBillAmount);
   elements.invoiceCount.textContent = String(state.invoices.length);
   elements.pendingAmount.textContent = formatCurrency(pendingAmount);
   elements.paidCount.textContent = String(paidCount);
@@ -1288,29 +1291,31 @@ function renderPreview(invoice) {
     : `<tr><td colspan="7">No items added yet.</td></tr>`;
 
   elements.invoicePreview.innerHTML = `
+    <div class="invoice-paper-title">
+      <p class="section-kicker">${documentLabel}</p>
+      <h2>${documentType === "Proforma Invoice" ? "Proforma Invoice" : "Tax Invoice"}</h2>
+    </div>
+
     <div class="invoice-paper-header">
       <div>
-        <p class="section-kicker">${documentLabel}</p>
-        <h2>${escapeHtml(businessProfile.businessName || "Your Company")}</h2>
+        <h3>${escapeHtml(businessProfile.businessName || "Your Company")}</h3>
         <p>${escapeHtml(businessProfile.address || "Add your company address from the Company tab.")}</p>
         <p>Email: ${escapeHtml(businessProfile.businessEmail || "-")}</p>
         <p>Phone: ${escapeHtml(businessProfile.businessPhone || "-")}</p>
         <p>GSTIN: ${escapeHtml(businessProfile.businessGst || "-")}</p>
       </div>
-      <div class="preview-meta">
-        <span>${numberLabel}</span>
-        <strong>${escapeHtml(invoice.invoiceNumber || "-")}</strong>
-        <span>Document Date</span>
-        <strong>${formatDate(invoice.invoiceDate)}</strong>
-        <span>Due Date</span>
-        <strong>${formatDate(invoice.dueDate)}</strong>
-        <span>Status</span>
-        <strong class="badge ${invoice.status.toLowerCase()}">${invoice.status}</strong>
-      </div>
+      <table class="invoice-paper-details">
+        <tbody>
+          <tr><td>${numberLabel}</td><td><strong>${escapeHtml(invoice.invoiceNumber || "-")}</strong></td></tr>
+          <tr><td>Document Date</td><td><strong>${formatDate(invoice.invoiceDate)}</strong></td></tr>
+          <tr><td>Due Date</td><td><strong>${formatDate(invoice.dueDate)}</strong></td></tr>
+          <tr><td>Status</td><td><strong class="badge ${invoice.status.toLowerCase()}">${invoice.status}</strong></td></tr>
+        </tbody>
+      </table>
     </div>
 
     <div class="invoice-paper-meta">
-      <div>
+      <div class="invoice-paper-box">
         <p class="section-kicker">Billed To</p>
         <p><strong>${escapeHtml(invoice.clientName || "Client Name")}</strong></p>
         <p>${escapeHtml(invoice.clientAddress || "Client address will appear here.")}</p>
@@ -1318,9 +1323,9 @@ function renderPreview(invoice) {
         <p>Phone: ${escapeHtml(invoice.clientPhone || "-")}</p>
         <p>GST: ${escapeHtml(invoice.clientGst || "-")}</p>
       </div>
-      <div>
+      <div class="invoice-paper-box">
         <p class="section-kicker">Payment Notes</p>
-        ${(invoice.notes || "").split("\n").filter(Boolean).map((line) => `<p>${escapeHtml(line)}</p>`).join("")}
+        ${(invoice.notes || "").split("\n").filter(Boolean).map((line) => `<p>${escapeHtml(line)}</p>`).join("") || "<p>-</p>"}
       </div>
     </div>
 
@@ -1331,30 +1336,35 @@ function renderPreview(invoice) {
       <tbody>${itemsMarkup}</tbody>
     </table>
 
-    <div class="invoice-paper-total">
-      <table>
-        <tbody>
-          <tr><td>Subtotal</td><td>${formatCurrency(invoice.subtotal)}</td></tr>
-          <tr><td>Item Discount</td><td>${formatCurrency(invoice.itemDiscountTotal || 0)}</td></tr>
-          <tr><td>Extra Discount (${invoice.discountPercent || 0}%)</td><td>${formatCurrency(invoice.invoiceLevelDiscountAmount || 0)}</td></tr>
-          <tr><td>Total Discount</td><td>${formatCurrency(invoice.discountAmount)}</td></tr>
-          <tr><td>Taxable Amount</td><td>${formatCurrency(invoice.taxableAmount)}</td></tr>
-          <tr><td>GST (${invoice.gstPercent || 0}%)</td><td>${formatCurrency(invoice.gstAmount)}</td></tr>
-          <tr><td><strong>Grand Total</strong></td><td><strong>${formatCurrency(invoice.total)}</strong></td></tr>
-        </tbody>
-      </table>
-    </div>
-
-    <div class="invoice-paper-footer">
-      <div>
+    <div class="invoice-paper-bottom">
+      <div class="invoice-paper-box">
         <p class="section-kicker">Bank Details</p>
         ${paymentLines.length
           ? paymentLines.map((line) => `<p>${escapeHtml(line)}</p>`).join("")
           : "<p>Add your bank details from the Company tab.</p>"}
       </div>
+      <div class="invoice-paper-total">
+        <table>
+          <tbody>
+            <tr><td>Subtotal</td><td>${formatCurrency(invoice.subtotal)}</td></tr>
+            <tr><td>Item Discount</td><td>${formatCurrency(invoice.itemDiscountTotal || 0)}</td></tr>
+            <tr><td>Extra Discount (${invoice.discountPercent || 0}%)</td><td>${formatCurrency(invoice.invoiceLevelDiscountAmount || 0)}</td></tr>
+            <tr><td>Total Discount</td><td>${formatCurrency(invoice.discountAmount)}</td></tr>
+            <tr><td>Taxable Amount</td><td>${formatCurrency(invoice.taxableAmount)}</td></tr>
+            <tr><td>GST (${invoice.gstPercent || 0}%)</td><td>${formatCurrency(invoice.gstAmount)}</td></tr>
+            <tr class="invoice-grand-total"><td>Grand Total</td><td>${formatCurrency(invoice.total)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="invoice-paper-footer">
       <div>
         <p class="section-kicker">Declaration</p>
         <p>${declaration}</p>
+      </div>
+      <div class="invoice-signature">
+        <p>Authorized Signature</p>
       </div>
     </div>
   `;
@@ -1863,30 +1873,6 @@ function buildUserState(profile = null) {
   })];
 }
 
-function createWorkspaceSnapshot() {
-  return JSON.parse(JSON.stringify({
-    invoices: state.invoices,
-    users: state.users,
-    items: state.items,
-    businessProfile: state.businessProfile,
-    nextInvoiceCounter: state.nextInvoiceCounter,
-    proformaCounter: state.proformaCounter
-  }));
-}
-
-function shouldSeedSupabaseWorkspace(localSnapshot, remoteWorkspace) {
-  const hasRemoteRecords = remoteWorkspace.invoices.length || remoteWorkspace.items.length;
-  const hasLocalRecords = localSnapshot.invoices.length || localSnapshot.items.length;
-  const localUserMatchesCurrent = localSnapshot.users.some((entry) =>
-    entry.email?.toLowerCase() === state.currentUser?.email?.toLowerCase()
-  );
-  const localLooksLikeLegacySingleUser = localSnapshot.users.every((entry) =>
-    !entry.email || entry.userId === DEFAULT_USER.userId
-  );
-
-  return !hasRemoteRecords && hasLocalRecords && (localUserMatchesCurrent || localLooksLikeLegacySingleUser || !localSnapshot.users.length);
-}
-
 function normalizeItemRecord(item) {
   return {
     id: item.id || (crypto.randomUUID ? crypto.randomUUID() : `item-${Date.now()}`),
@@ -2148,35 +2134,21 @@ async function loadWorkspaceData() {
     return;
   }
 
-  const localSnapshot = createWorkspaceSnapshot();
   const workspace = await backendRequest("/api/workspace");
   applyWorkspaceResponse(workspace);
-
-  if (shouldSeedSupabaseWorkspace(localSnapshot, {
-    invoices: state.invoices,
-    items: state.items
-  })) {
-    state.invoices = localSnapshot.invoices.map(normalizeInvoiceRecord);
-    state.items = localSnapshot.items.map(normalizeItemRecord);
-    state.businessProfile = normalizeBusinessProfile(localSnapshot.businessProfile);
-    state.nextInvoiceCounter = Math.max(1, Number(localSnapshot.nextInvoiceCounter) || 1);
-    state.proformaCounter = Math.max(1, Number(localSnapshot.proformaCounter) || 1);
-    await saveWorkspaceData();
-    return;
-  }
-
   await cacheWorkspaceLocally();
 }
 
 async function applyAuthenticatedUser(user) {
   state.currentUser = createSessionFromSupabaseUser(user);
   saveSession(state.currentUser);
+  resetWorkspaceStateForAuthenticatedUser();
   await syncUserProfile(user);
   try {
     await loadWorkspaceData();
   } catch (error) {
     console.error("Failed to load Supabase workspace.", error);
-    elements.authMessage.textContent = "Signed in, but your cloud data could not be loaded. Showing the local cache for now.";
+    elements.authMessage.textContent = "Signed in, but your cloud workspace could not be loaded. No cached workspace was imported for this account.";
   }
   updateSessionLabel();
   showApp();
@@ -2189,6 +2161,17 @@ async function applyAuthenticatedUser(user) {
   } else {
     switchTab("dashboard");
   }
+}
+
+function resetWorkspaceStateForAuthenticatedUser() {
+  state.invoices = [];
+  state.items = [];
+  state.businessProfile = normalizeBusinessProfile();
+  state.nextInvoiceCounter = 1;
+  state.proformaCounter = 1;
+  state.editingInvoiceId = "";
+  state.previewInvoice = null;
+  state.users = state.currentUser ? [createCurrentUserRecord()] : [];
 }
 
 async function syncUserProfile(user) {
