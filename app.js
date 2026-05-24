@@ -1359,10 +1359,6 @@ function renderPreview(invoice) {
         <table>
           <tbody>
             <tr><td>Subtotal</td><td>${formatCurrency(invoice.subtotal)}</td></tr>
-            <tr><td>Item Discount</td><td>${formatCurrency(invoice.itemDiscountTotal || 0)}</td></tr>
-            <tr><td>Extra Discount (${invoice.discountPercent || 0}%)</td><td>${formatCurrency(invoice.invoiceLevelDiscountAmount || 0)}</td></tr>
-            <tr><td>Total Discount</td><td>${formatCurrency(invoice.discountAmount)}</td></tr>
-            <tr><td>Taxable Amount</td><td>${formatCurrency(invoice.taxableAmount)}</td></tr>
             <tr><td>GST (${invoice.gstPercent || 0}%)</td><td>${formatCurrency(invoice.gstAmount)}</td></tr>
             <tr class="invoice-grand-total"><td>Grand Total</td><td>${formatCurrency(invoice.total)}</td></tr>
           </tbody>
