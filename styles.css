@@ -516,6 +516,15 @@ th { font-size: 0.9rem; }
   border-top: 1px solid var(--line);
 }
 
+.signature-stamp {
+  display: block;
+  width: 150px;
+  max-width: 100%;
+  height: auto;
+  margin: -34px auto 8px;
+  mix-blend-mode: multiply;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;
@@ -640,6 +649,11 @@ th { font-size: 0.9rem; }
     min-width: 160px;
     padding-top: 26px;
   }
+  .signature-stamp {
+    width: 110px;
+    margin-top: -24px;
+    margin-bottom: 4px;
+  }
   .badge {
     padding: 3px 7px;
     font-size: 0.68rem;
@@ -654,3 +668,4 @@ th { font-size: 0.9rem; }
     page-break-inside: avoid;
   }
 }
+

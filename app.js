@@ -1372,6 +1372,7 @@ function renderPreview(invoice) {
         <p>${declaration}</p>
       </div>
       <div class="invoice-signature">
+        <img src="assets/authorized-signature-mohar.jpeg" alt="Authorized signature stamp" class="signature-stamp">
         <p>Authorized Signature</p>
       </div>
     </div>
@@ -2498,3 +2499,4 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
 }
+
