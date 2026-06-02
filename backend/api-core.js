@@ -182,10 +182,9 @@ async function loadWorkspace(authUser) {
     profile,
     items,
     invoices,
-    counters: counters || {
+    counters: {
       user_id: authUser.id,
-      invoice_counter: 1,
-      proforma_counter: 1
+      ...inferNextCounters(invoices, counters)
     }
   };
 }
@@ -269,7 +268,8 @@ async function saveInvoiceRecord(authUser, invoice) {
     counters: {
       user_id: authUser.id,
       invoice_counter: nextCounters.invoice_counter,
-      proforma_counter: nextCounters.proforma_counter
+      proforma_counter: nextCounters.proforma_counter,
+      purchase_counter: nextCounters.purchase_counter
     }
   };
 }
@@ -589,7 +589,8 @@ function validateWorkspacePayload(payload) {
     invoices: Array.isArray(payload.invoices) ? payload.invoices : [],
     counters: {
       invoice_counter: positiveNumber(counters.invoice_counter, 1),
-      proforma_counter: positiveNumber(counters.proforma_counter, 1)
+      proforma_counter: positiveNumber(counters.proforma_counter, 1),
+      purchase_counter: positiveNumber(counters.purchase_counter, 1)
     }
   };
 }
@@ -642,6 +643,7 @@ function sanitizeInvoiceRow(invoice, userId) {
 function inferNextCounters(invoices = [], counters = null) {
   let invoiceCounter = positiveNumber(counters?.invoice_counter, 1);
   let proformaCounter = positiveNumber(counters?.proforma_counter, 1);
+  let purchaseCounter = positiveNumber(counters?.purchase_counter, 1);
 
   invoices.forEach((invoice) => {
     const sequence = readDocumentSequence(invoice.invoice_number);
@@ -654,6 +656,11 @@ function inferNextCounters(invoices = [], counters = null) {
       return;
     }
 
+    if (sequence.prefix === "PB") {
+      purchaseCounter = Math.max(purchaseCounter, sequence.value + 1);
+      return;
+    }
+
     if (sequence.prefix === "AE") {
       invoiceCounter = Math.max(invoiceCounter, sequence.value + 1);
     }
@@ -661,12 +668,15 @@ function inferNextCounters(invoices = [], counters = null) {
 
   return {
     invoice_counter: invoiceCounter,
-    proforma_counter: proformaCounter
+    proforma_counter: proformaCounter,
+    purchase_counter: purchaseCounter
   };
 }
 
 function resolveInvoiceNumber(existingInvoices, invoice, counters, options = {}) {
-  const normalizedType = invoice.document_type === "Proforma Invoice" ? "Proforma Invoice" : "Bill";
+  const normalizedType = invoice.document_type === "Proforma Invoice"
+    ? "Proforma Invoice"
+    : (invoice.document_type === "Purchase Bill" ? "Purchase Bill" : "Bill");
   const usedNumbers = new Set(
     existingInvoices
       .filter((entry) => entry.id !== invoice.id && entry.document_type === normalizedType)
@@ -684,6 +694,8 @@ function resolveInvoiceNumber(existingInvoices, invoice, counters, options = {})
   while (usedNumbers.has(candidate)) {
     if (normalizedType === "Proforma Invoice") {
       counters.proforma_counter += 1;
+    } else if (normalizedType === "Purchase Bill") {
+      counters.purchase_counter += 1;
     } else {
       counters.invoice_counter += 1;
     }
@@ -697,6 +709,9 @@ function resolveInvoiceNumber(existingInvoices, invoice, counters, options = {})
 function getNextInvoiceNumber(documentType, counters) {
   if (documentType === "Proforma Invoice") {
     return `PI-${String(counters.proforma_counter).padStart(4, "0")}`;
+  }
+  if (documentType === "Purchase Bill") {
+    return `PB-${String(counters.purchase_counter).padStart(4, "0")}`;
   }
 
   return `AE-${String(counters.invoice_counter).padStart(4, "0")}`;
@@ -712,12 +727,16 @@ function advanceCountersFromInvoiceNumber(documentType, invoiceNumber, counters)
     counters.proforma_counter = Math.max(counters.proforma_counter, sequence.value + 1);
     return;
   }
+  if (documentType === "Purchase Bill" || sequence.prefix === "PB") {
+    counters.purchase_counter = Math.max(counters.purchase_counter, sequence.value + 1);
+    return;
+  }
 
   counters.invoice_counter = Math.max(counters.invoice_counter, sequence.value + 1);
 }
 
 function readDocumentSequence(invoiceNumber) {
-  const match = String(invoiceNumber || "").trim().toUpperCase().match(/^(AE|PI)-(\d+)$/);
+  const match = String(invoiceNumber || "").trim().toUpperCase().match(/^(AE|PI|PB)-(\d+)$/);
   if (!match) {
     return null;
   }

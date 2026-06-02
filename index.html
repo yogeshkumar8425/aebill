@@ -84,7 +84,9 @@
       <button class="tab-button" data-tab="company">Company</button>
       <button class="tab-button" data-tab="item-store">Item Store</button>
       <button class="tab-button" data-tab="new-invoice">New Bill</button>
+      <button class="tab-button" data-tab="purchase-bill">Purchase Bill</button>
       <button class="tab-button" data-tab="all-invoices">All Bills</button>
+      <button class="tab-button" data-tab="purchase-bills">Purchase Bills</button>
       <button class="tab-button" data-tab="preview">Preview</button>
     </nav>
 
@@ -93,6 +95,7 @@
         <div class="stat-grid">
           <article class="stat-card"><p>All Item Value</p><h2 id="totalBilled">Rs 0.00</h2></article>
           <article class="stat-card"><p>Total Bill Amount</p><h2 id="totalBillAmount">Rs 0.00</h2></article>
+          <article class="stat-card"><p>Purchase Bill Amount</p><h2 id="purchaseBillAmount">Rs 0.00</h2></article>
           <article class="stat-card"><p>Total Bills</p><h2 id="invoiceCount">0</h2></article>
           <article class="stat-card"><p>Pending Amount</p><h2 id="pendingAmount">Rs 0.00</h2></article>
           <article class="stat-card"><p>Paid Bills</p><h2 id="paidCount">0</h2></article>
@@ -168,6 +171,7 @@
                   <select name="documentType">
                     <option value="Bill">Tax Invoice</option>
                     <option value="Proforma Invoice">Proforma Invoice</option>
+                    <option value="Purchase Bill">Purchase Bill</option>
                   </select>
                 </label>
                 <label>Document Number<input type="text" name="invoiceNumber" placeholder="Enter document number"></label>
@@ -328,6 +332,19 @@
             <button class="secondary-button" id="createFromList">Create Document</button>
           </div>
           <div id="allInvoicesTable" class="table-wrap"></div>
+        </div>
+      </section>
+
+      <section id="purchase-bills" class="tab-panel">
+        <div class="panel">
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">Purchase Register</p>
+              <h3>Saved Purchase Bills</h3>
+            </div>
+            <button class="secondary-button" id="createPurchaseFromList">Create Purchase Bill</button>
+          </div>
+          <div id="purchaseBillsTable" class="table-wrap"></div>
         </div>
       </section>
 

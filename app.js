@@ -1,6 +1,7 @@
 const STORAGE_KEY = "awanshi-enterprises-invoices";
 const COUNTER_KEY = "awanshi-enterprises-next-invoice";
 const PROFORMA_COUNTER_KEY = "awanshi-enterprises-next-proforma";
+const PURCHASE_COUNTER_KEY = "awanshi-enterprises-next-purchase";
 const SESSION_KEY = "awanshi-enterprises-session";
 const USERS_KEY = "awanshi-enterprises-users";
 const DB_NAME = "awanshi-enterprises-db";
@@ -44,6 +45,7 @@ const state = {
   businessProfile: { ...DEFAULT_BUSINESS_PROFILE },
   nextInvoiceCounter: 1,
   proformaCounter: 1,
+  purchaseCounter: 1,
   invoiceNumberEditedManually: false,
   db: null,
   appReady: false,
@@ -102,13 +104,16 @@ const elements = {
   backupMessage: document.getElementById("backupMessage"),
   createFromDashboard: document.getElementById("createFromDashboard"),
   createFromList: document.getElementById("createFromList"),
+  createPurchaseFromList: document.getElementById("createPurchaseFromList"),
   recentInvoices: document.getElementById("recentInvoices"),
   itemStoreTable: document.getElementById("itemStoreTable"),
   itemSummaryTable: document.getElementById("itemSummaryTable"),
   allInvoicesTable: document.getElementById("allInvoicesTable"),
+  purchaseBillsTable: document.getElementById("purchaseBillsTable"),
   invoicePreview: document.getElementById("invoicePreview"),
   totalBilled: document.getElementById("totalBilled"),
   totalBillAmount: document.getElementById("totalBillAmount"),
+  purchaseBillAmount: document.getElementById("purchaseBillAmount"),
   invoiceCount: document.getElementById("invoiceCount"),
   pendingAmount: document.getElementById("pendingAmount"),
   paidCount: document.getElementById("paidCount"),
@@ -175,6 +180,7 @@ async function initializeApp() {
   state.businessProfile = normalizeBusinessProfile(await getMetaValue("businessProfile", DEFAULT_BUSINESS_PROFILE));
   state.nextInvoiceCounter = await getMetaValue("invoiceCounter", 1);
   state.proformaCounter = await getMetaValue("proformaCounter", 1);
+  state.purchaseCounter = await getMetaValue("purchaseCounter", 1);
 
   bindAuthActions();
   await initializeSupabaseAuth();
@@ -196,6 +202,7 @@ function initializeBillingApp() {
     renderDashboard();
     renderItemStore();
     renderInvoicesTable();
+    renderPurchaseBillsTable();
     renderPreview(createDraftFromForm());
     return;
   }
@@ -211,6 +218,7 @@ function initializeBillingApp() {
   renderDashboard();
   renderItemStore();
   renderInvoicesTable();
+  renderPurchaseBillsTable();
   renderPreview(createDraftFromForm());
   state.appReady = true;
 }
@@ -557,6 +565,7 @@ async function handleSaveItem(event) {
     renderItemStore();
     renderDashboard();
     renderInvoicesTable();
+    renderPurchaseBillsTable();
     updateTotals();
   } catch (error) {
     console.error("Failed to save item.", error);
@@ -601,6 +610,7 @@ async function handleImportBackup(event) {
     state.businessProfile = backup.businessProfile;
     state.nextInvoiceCounter = backup.meta.invoiceCounter;
     state.proformaCounter = backup.meta.proformaCounter;
+    state.purchaseCounter = backup.meta.purchaseCounter;
 
     await saveInvoices();
     await saveUsers();
@@ -615,6 +625,7 @@ async function handleImportBackup(event) {
     renderDashboard();
     renderItemStore();
     renderInvoicesTable();
+    renderPurchaseBillsTable();
     renderPreview(createDraftFromForm());
     elements.backupMessage.textContent = `Backup imported from ${file.name}.`;
   } catch (error) {
@@ -711,7 +722,14 @@ function updateSessionLabel() {
 
 function bindTabNavigation() {
   elements.tabs.forEach((button) => {
-    button.addEventListener("click", () => switchTab(button.dataset.tab));
+    button.addEventListener("click", () => {
+      if (button.dataset.tab === "purchase-bill") {
+        resetForm("Purchase Bill");
+      } else if (button.dataset.tab === "new-invoice") {
+        resetForm("Bill");
+      }
+      switchTab(button.dataset.tab);
+    });
   });
 }
 
@@ -736,8 +754,9 @@ function switchTab(targetId) {
       button.removeAttribute("title");
     }
   });
+  const activePanelId = targetId === "purchase-bill" ? "new-invoice" : targetId;
   elements.panels.forEach((panel) => {
-    panel.classList.toggle("active", panel.id === targetId);
+    panel.classList.toggle("active", panel.id === activePanelId);
   });
 }
 
@@ -750,12 +769,16 @@ function bindFormActions() {
   });
   elements.printButton.addEventListener("click", () => window.print());
   elements.createFromDashboard.addEventListener("click", () => {
-    resetForm();
+    resetForm("Bill");
     switchTab("new-invoice");
   });
   elements.createFromList.addEventListener("click", () => {
-    resetForm();
+    resetForm("Bill");
     switchTab("new-invoice");
+  });
+  elements.createPurchaseFromList?.addEventListener("click", () => {
+    resetForm("Purchase Bill");
+    switchTab("purchase-bill");
   });
 
   ["input", "change"].forEach((eventName) => {
@@ -804,15 +827,15 @@ function bindBackupActions() {
   elements.importBackupInput.addEventListener("change", handleImportBackup);
 }
 
-function resetForm() {
+function resetForm(documentType = "Bill") {
   syncDocumentCountersWithInvoices();
   state.editingInvoiceId = "";
   state.invoiceNumberEditedManually = false;
   elements.form.reset();
   elements.itemsBody.innerHTML = "";
   addItemRow();
-  elements.form.elements.documentType.value = "Bill";
-  elements.form.elements.invoiceNumber.value = getNextDocumentNumber("Bill");
+  elements.form.elements.documentType.value = documentType;
+  elements.form.elements.invoiceNumber.value = getNextDocumentNumber(documentType);
   elements.form.elements.invoiceDate.value = todayString();
   elements.form.elements.dueDate.value = todayString(7);
   elements.form.elements.gstPercent.value = state.businessProfile.defaultGst;
@@ -1018,10 +1041,11 @@ async function handleSaveInvoice(event) {
 
     renderDashboard();
     renderInvoicesTable();
+    renderPurchaseBillsTable();
     renderPreview(savedInvoice);
     window.alert(`${getDocumentLabel(savedInvoice.documentType)} ${savedInvoice.invoiceNumber} saved successfully.`);
-    resetForm();
-    switchTab("all-invoices");
+    resetForm(savedInvoice.documentType === "Purchase Bill" ? "Purchase Bill" : "Bill");
+    switchTab(savedInvoice.documentType === "Purchase Bill" ? "purchase-bills" : "all-invoices");
   } catch (error) {
     console.error("Failed to save invoice.", error);
     window.alert(`Failed to save document. ${error.message || "Please try again."}`);
@@ -1093,6 +1117,7 @@ async function saveInvoiceToBackend(invoice) {
   const savedInvoice = mapInvoiceFromSupabaseRow(response.invoice);
   state.nextInvoiceCounter = Math.max(1, Number(response.counters?.invoice_counter) || state.nextInvoiceCounter || 1);
   state.proformaCounter = Math.max(1, Number(response.counters?.proforma_counter) || state.proformaCounter || 1);
+  state.purchaseCounter = Math.max(1, Number(response.counters?.purchase_counter) || state.purchaseCounter || 1);
   upsertInvoiceInState(savedInvoice);
   await cacheWorkspaceLocally();
   return savedInvoice;
@@ -1112,41 +1137,54 @@ function upsertInvoiceInState(invoice) {
 }
 
 function renderDashboard() {
+  const salesInvoices = getSalesDocuments();
   const allItemsTotalValue = getAllItemsTotalValue();
-  const totalBillAmount = state.invoices.reduce((sum, invoice) => sum + invoice.total, 0);
-  const pendingAmount = state.invoices
+  const purchaseBillAmount = getPurchaseDocuments().reduce((sum, invoice) => sum + invoice.total, 0);
+  const totalBillAmount = salesInvoices.reduce((sum, invoice) => sum + invoice.total, 0);
+  const pendingAmount = salesInvoices
     .filter((invoice) => invoice.status === "Pending")
     .reduce((sum, invoice) => sum + invoice.total, 0);
-  const paidCount = state.invoices.filter((invoice) => invoice.status === "Paid").length;
+  const paidCount = salesInvoices.filter((invoice) => invoice.status === "Paid").length;
   const stockBalance = getItemSummary().reduce((sum, item) => sum + item.currentStock, 0);
 
   elements.totalBilled.textContent = formatCurrency(allItemsTotalValue);
   elements.totalBillAmount.textContent = formatCurrency(totalBillAmount);
-  elements.invoiceCount.textContent = String(state.invoices.length);
+  elements.purchaseBillAmount.textContent = formatCurrency(purchaseBillAmount);
+  elements.invoiceCount.textContent = String(salesInvoices.length);
   elements.pendingAmount.textContent = formatCurrency(pendingAmount);
   elements.paidCount.textContent = String(paidCount);
   elements.stockBalance.textContent = String(stockBalance);
 
-  const recent = state.invoices.slice(0, 5);
+  const recent = salesInvoices.slice(0, 5);
   if (!recent.length) {
-    elements.recentInvoices.innerHTML = `<div class="empty-state">No documents yet. Create your first bill or proforma invoice from the New Document tab.</div>`;
-    elements.itemSummaryTable.innerHTML = `<div class="empty-state">Item-wise totals and stock will appear here after you save documents.</div>`;
-    return;
+    elements.recentInvoices.innerHTML = `<div class="empty-state">No sales documents yet. Create a bill or proforma invoice from the New Bill tab.</div>`;
+  } else {
+    elements.recentInvoices.innerHTML = createInvoicesTableMarkup(recent, false);
+    bindInvoiceTableActions(elements.recentInvoices);
   }
-
-  elements.recentInvoices.innerHTML = createInvoicesTableMarkup(recent, false);
-  bindInvoiceTableActions(elements.recentInvoices);
   renderItemSummary();
 }
 
 function renderInvoicesTable() {
-  if (!state.invoices.length) {
-    elements.allInvoicesTable.innerHTML = `<div class="empty-state">No saved documents yet.</div>`;
+  const salesInvoices = getSalesDocuments();
+  if (!salesInvoices.length) {
+    elements.allInvoicesTable.innerHTML = `<div class="empty-state">No saved invoice documents yet.</div>`;
     return;
   }
 
-  elements.allInvoicesTable.innerHTML = createInvoicesTableMarkup(state.invoices, true);
+  elements.allInvoicesTable.innerHTML = createInvoicesTableMarkup(salesInvoices, true, "Client");
   bindInvoiceTableActions(elements.allInvoicesTable);
+}
+
+function renderPurchaseBillsTable() {
+  const purchaseBills = getPurchaseDocuments();
+  if (!purchaseBills.length) {
+    elements.purchaseBillsTable.innerHTML = `<div class="empty-state">No saved purchase bills yet.</div>`;
+    return;
+  }
+
+  elements.purchaseBillsTable.innerHTML = createInvoicesTableMarkup(purchaseBills, true, "Vendor");
+  bindInvoiceTableActions(elements.purchaseBillsTable);
 }
 
 function bindInvoiceTableActions(container) {
@@ -1181,7 +1219,7 @@ function editInvoice(id) {
   }
 
   populateFormFromInvoice(invoice, { duplicate: false });
-  switchTab("new-invoice");
+  switchTab(invoice.documentType === "Purchase Bill" ? "purchase-bill" : "new-invoice");
 }
 
 function duplicateInvoice(id) {
@@ -1191,7 +1229,7 @@ function duplicateInvoice(id) {
   }
 
   populateFormFromInvoice(invoice, { duplicate: true });
-  switchTab("new-invoice");
+  switchTab(invoice.documentType === "Purchase Bill" ? "purchase-bill" : "new-invoice");
 }
 
 function populateFormFromInvoice(invoice, options = {}) {
@@ -1242,6 +1280,7 @@ async function rotateStatus(id) {
     await saveInvoices();
     renderDashboard();
     renderInvoicesTable();
+    renderPurchaseBillsTable();
   } catch (error) {
     console.error("Failed to update invoice status.", error);
     window.alert(`Failed to update invoice status. ${error.message || "Please try again."}`);
@@ -1259,6 +1298,7 @@ async function deleteInvoice(id) {
     await saveInvoices();
     renderDashboard();
     renderInvoicesTable();
+    renderPurchaseBillsTable();
   } catch (error) {
     console.error("Failed to delete invoice.", error);
     window.alert(`Failed to delete invoice. ${error.message || "Please try again."}`);
@@ -1283,10 +1323,17 @@ function renderPreview(invoice) {
 
   const documentType = invoice.documentType || "Bill";
   const documentLabel = getDocumentLabel(documentType);
-  const numberLabel = documentType === "Proforma Invoice" ? "PI No." : "Bill No.";
+  const isPurchase = documentType === "Purchase Bill";
+  const numberLabel = documentType === "Proforma Invoice" ? "PI No." : (isPurchase ? "Purchase Bill No." : "Bill No.");
   const declaration = documentType === "Proforma Invoice"
     ? "This proforma invoice is a price estimate for customer approval and does not confirm the final tax bill."
-    : "This bill is generated for business billing and GST calculation on the post-discount amount.";
+    : (isPurchase
+      ? "This purchase bill records vendor goods or services received for business accounting."
+      : "This bill is generated for business billing and GST calculation on the post-discount amount.");
+  const recipientKicker = isPurchase ? "Purchased From" : "Billed To";
+  const recipientName = isPurchase ? "Vendor Name" : "Client Name";
+  const recipientAddress = isPurchase ? "Vendor address will appear here." : "Client address will appear here.";
+  const previewTitle = documentType === "Proforma Invoice" ? "Proforma Invoice" : (isPurchase ? "Purchase Bill" : "Tax Invoice");
 
   const itemsMarkup = invoice.items.length
     ? invoice.items.map((item, index) => `
@@ -1305,7 +1352,7 @@ function renderPreview(invoice) {
   elements.invoicePreview.innerHTML = `
     <div class="invoice-paper-title">
       <p class="section-kicker">${documentLabel}</p>
-      <h2>${documentType === "Proforma Invoice" ? "Proforma Invoice" : "Tax Invoice"}</h2>
+      <h2>${previewTitle}</h2>
     </div>
 
     <div class="invoice-paper-header">
@@ -1328,9 +1375,9 @@ function renderPreview(invoice) {
 
     <div class="invoice-paper-meta">
       <div class="invoice-paper-box">
-        <p class="section-kicker">Billed To</p>
-        <p><strong>${escapeHtml(invoice.clientName || "Client Name")}</strong></p>
-        <p>${escapeHtml(invoice.clientAddress || "Client address will appear here.")}</p>
+        <p class="section-kicker">${recipientKicker}</p>
+        <p><strong>${escapeHtml(invoice.clientName || recipientName)}</strong></p>
+        <p>${escapeHtml(invoice.clientAddress || recipientAddress)}</p>
         <p>Email: ${escapeHtml(invoice.clientEmail || "-")}</p>
         <p>Phone: ${escapeHtml(invoice.clientPhone || "-")}</p>
         <p>GST: ${escapeHtml(invoice.clientGst || "-")}</p>
@@ -1391,7 +1438,8 @@ function renderItemStore() {
     .sort((a, b) => a.name.localeCompare(b.name))
     .map((item) => {
       const soldQty = getSoldQuantity(item.name);
-      const currentStock = Number(item.stockQty || 0) - soldQty;
+      const purchasedQty = getPurchasedQuantity(item.name);
+      const currentStock = Number(item.stockQty || 0) + purchasedQty - soldQty;
       const itemTotalValue = currentStock * Number(item.rate || 0);
 
       return `
@@ -1400,6 +1448,7 @@ function renderItemStore() {
           <td>${escapeHtml(item.hsnCode || "-")}</td>
           <td>${formatCurrency(item.rate || 0)}</td>
           <td>${formatQuantity(item.stockQty)}</td>
+          <td>${formatQuantity(purchasedQty)}</td>
           <td>${formatQuantity(soldQty)}</td>
           <td>${formatQuantity(currentStock)}</td>
           <td>${formatCurrency(itemTotalValue)}</td>
@@ -1417,11 +1466,11 @@ function renderItemStore() {
   elements.itemStoreTable.innerHTML = `
     <table>
       <thead>
-        <tr><th>Item Name</th><th>HSN Code</th><th>Rate</th><th>Stock Qty</th><th>Sold Qty</th><th>Current Stock</th><th>Total Value</th><th>Actions</th></tr>
+        <tr><th>Item Name</th><th>HSN Code</th><th>Rate</th><th>Opening Stock</th><th>Purchase Qty</th><th>Sold Qty</th><th>Current Stock</th><th>Total Value</th><th>Actions</th></tr>
       </thead>
       <tbody>${rows}</tbody>
       <tfoot>
-        <tr><th colspan="6">All Items Total Value</th><th>${formatCurrency(getAllItemsTotalValue())}</th><th></th></tr>
+        <tr><th colspan="7">All Items Total Value</th><th>${formatCurrency(getAllItemsTotalValue())}</th><th></th></tr>
       </tfoot>
     </table>
   `;
@@ -1433,7 +1482,8 @@ function renderItemSummary() {
     .map((entry) => `
       <tr>
         <td>${escapeHtml(entry.description)}</td>
-        <td>${formatQuantity(entry.totalQty)}</td>
+        <td>${formatQuantity(entry.purchasedQty)}</td>
+        <td>${formatQuantity(entry.soldQty)}</td>
         <td>${formatCurrency(entry.totalAmount)}</td>
         <td>${formatQuantity(entry.currentStock)}</td>
       </tr>
@@ -1444,7 +1494,7 @@ function renderItemSummary() {
     ? `
       <table>
         <thead>
-          <tr><th>Item Name</th><th>Sold Qty</th><th>Total Amount</th><th>Current Stock</th></tr>
+          <tr><th>Item Name</th><th>Purchase Qty</th><th>Sold Qty</th><th>Sales Amount</th><th>Current Stock</th></tr>
         </thead>
         <tbody>${rows}</tbody>
       </table>
@@ -1463,6 +1513,8 @@ function getItemSummary() {
 
     summaryMap.set(key, {
       description: item.name.trim(),
+      purchasedQty: 0,
+      soldQty: 0,
       totalQty: 0,
       totalAmount: 0,
       stockQty: Number(item.stockQty || 0),
@@ -1470,7 +1522,7 @@ function getItemSummary() {
     });
   });
 
-  state.invoices.forEach((invoice) => {
+  getSalesDocuments().forEach((invoice) => {
     (invoice.items || []).forEach((item) => {
       const key = item.description?.trim().toLowerCase();
       if (!key) {
@@ -1480,6 +1532,8 @@ function getItemSummary() {
       if (!summaryMap.has(key)) {
         summaryMap.set(key, {
           description: item.description.trim(),
+          purchasedQty: 0,
+          soldQty: 0,
           totalQty: 0,
           totalAmount: 0,
           stockQty: 0,
@@ -1488,9 +1542,36 @@ function getItemSummary() {
       }
 
       const entry = summaryMap.get(key);
-      entry.totalQty += Number(item.quantity || 0);
+      entry.soldQty += Number(item.quantity || 0);
+      entry.totalQty = entry.soldQty;
       entry.totalAmount += Number(item.amount || 0);
-      entry.currentStock = entry.stockQty - entry.totalQty;
+      entry.currentStock = entry.stockQty + entry.purchasedQty - entry.soldQty;
+    });
+  });
+
+
+  getPurchaseDocuments().forEach((invoice) => {
+    (invoice.items || []).forEach((item) => {
+      const key = item.description?.trim().toLowerCase();
+      if (!key) {
+        return;
+      }
+
+      if (!summaryMap.has(key)) {
+        summaryMap.set(key, {
+          description: item.description.trim(),
+          purchasedQty: 0,
+          soldQty: 0,
+          totalQty: 0,
+          totalAmount: 0,
+          stockQty: 0,
+          currentStock: 0
+        });
+      }
+
+      const entry = summaryMap.get(key);
+      entry.purchasedQty += Number(item.quantity || 0);
+      entry.currentStock = entry.stockQty + entry.purchasedQty - entry.soldQty;
     });
   });
 
@@ -1500,12 +1581,12 @@ function getItemSummary() {
 function getAllItemsTotalValue() {
   return state.items.reduce((sum, item) => {
     const soldQty = getSoldQuantity(item.name);
-    const currentStock = Number(item.stockQty || 0) - soldQty;
+    const currentStock = Number(item.stockQty || 0) + getPurchasedQuantity(item.name) - soldQty;
     return sum + (currentStock * Number(item.rate || 0));
   }, 0);
 }
 
-function createInvoicesTableMarkup(invoices, includeDelete) {
+function createInvoicesTableMarkup(invoices, includeDelete, partyHeader = "Client") {
   const rows = invoices.map((invoice) => `
     <tr>
       <td>${escapeHtml(invoice.documentType || "Bill")}</td>
@@ -1529,7 +1610,7 @@ function createInvoicesTableMarkup(invoices, includeDelete) {
   return `
     <table>
       <thead>
-          <tr><th>Type</th><th>Document No.</th><th>Client</th><th>Date</th><th>Total</th><th>Status</th><th>Actions</th></tr>
+          <tr><th>Type</th><th>Document No.</th><th>${partyHeader}</th><th>Date</th><th>Total</th><th>Status</th><th>Actions</th></tr>
         </thead>
         <tbody>${rows}</tbody>
       </table>
@@ -1794,7 +1875,8 @@ function buildWorkspacePayload() {
     invoices: state.invoices.map(mapInvoiceToSupabaseRow),
     counters: {
       invoice_counter: state.nextInvoiceCounter,
-      proforma_counter: state.proformaCounter
+      proforma_counter: state.proformaCounter,
+      purchase_counter: state.purchaseCounter
     }
   };
 }
@@ -1831,6 +1913,7 @@ function applyWorkspaceResponse(workspace) {
   state.invoices = Array.isArray(workspace.invoices) ? workspace.invoices.map(mapInvoiceFromSupabaseRow) : [];
   state.nextInvoiceCounter = Math.max(1, Number(workspace.counters?.invoice_counter) || 1);
   state.proformaCounter = Math.max(1, Number(workspace.counters?.proforma_counter) || 1);
+  state.purchaseCounter = Math.max(1, Number(workspace.counters?.purchase_counter) || 1);
   syncDocumentCountersWithInvoices();
 }
 
@@ -1971,6 +2054,8 @@ function getResolvedDocumentNumber(documentType = "Bill", requestedNumber = "", 
   while (usedNumbers.has(candidate)) {
     if (documentType === "Proforma Invoice") {
       state.proformaCounter += 1;
+    } else if (documentType === "Purchase Bill") {
+      state.purchaseCounter += 1;
     } else {
       state.nextInvoiceCounter += 1;
     }
@@ -1984,11 +2069,13 @@ function syncDocumentCountersWithInvoices() {
   const inferredCounters = inferDocumentCountersFromInvoices(state.invoices);
   state.nextInvoiceCounter = Math.max(state.nextInvoiceCounter || 1, inferredCounters.invoiceCounter);
   state.proformaCounter = Math.max(state.proformaCounter || 1, inferredCounters.proformaCounter);
+  state.purchaseCounter = Math.max(state.purchaseCounter || 1, inferredCounters.purchaseCounter);
 }
 
 function inferDocumentCountersFromInvoices(invoices = []) {
   let invoiceCounter = 1;
   let proformaCounter = 1;
+  let purchaseCounter = 1;
 
   invoices.forEach((invoice) => {
     const sequence = readDocumentSequence(invoice.invoiceNumber);
@@ -2001,6 +2088,11 @@ function inferDocumentCountersFromInvoices(invoices = []) {
       return;
     }
 
+    if (sequence.prefix === "PB") {
+      purchaseCounter = Math.max(purchaseCounter, sequence.value + 1);
+      return;
+    }
+
     if (sequence.prefix === "AE") {
       invoiceCounter = Math.max(invoiceCounter, sequence.value + 1);
     }
@@ -2008,12 +2100,13 @@ function inferDocumentCountersFromInvoices(invoices = []) {
 
   return {
     invoiceCounter,
-    proformaCounter
+    proformaCounter,
+    purchaseCounter
   };
 }
 
 function readDocumentSequence(invoiceNumber = "") {
-  const match = String(invoiceNumber || "").trim().toUpperCase().match(/^(AE|PI)-(\d+)$/);
+  const match = String(invoiceNumber || "").trim().toUpperCase().match(/^(AE|PI|PB)-(\d+)$/);
   if (!match) {
     return null;
   }
@@ -2109,6 +2202,7 @@ async function cacheWorkspaceLocally() {
   await setMetaValue("businessProfile", state.businessProfile);
   await setMetaValue("invoiceCounter", state.nextInvoiceCounter);
   await setMetaValue("proformaCounter", state.proformaCounter);
+  await setMetaValue("purchaseCounter", state.purchaseCounter);
 }
 
 async function saveBusinessProfile() {
@@ -2136,6 +2230,7 @@ async function saveUserCounters() {
   await setMetaValue("businessProfile", state.businessProfile);
   await setMetaValue("invoiceCounter", state.nextInvoiceCounter);
   await setMetaValue("proformaCounter", state.proformaCounter);
+  await setMetaValue("purchaseCounter", state.purchaseCounter);
 }
 
 async function loadWorkspaceData() {
@@ -2178,6 +2273,7 @@ function resetWorkspaceStateForAuthenticatedUser() {
   state.businessProfile = normalizeBusinessProfile();
   state.nextInvoiceCounter = 1;
   state.proformaCounter = 1;
+  state.purchaseCounter = 1;
   state.editingInvoiceId = "";
   state.previewInvoice = null;
   state.invoiceNumberEditedManually = false;
@@ -2222,12 +2318,21 @@ async function saveInvoices() {
 }
 
 function getDocumentLabel(documentType = "Bill") {
-  return documentType === "Proforma Invoice" ? "Proforma Invoice" : "Bill";
+  if (documentType === "Proforma Invoice") {
+    return "Proforma Invoice";
+  }
+  if (documentType === "Purchase Bill") {
+    return "Purchase Bill";
+  }
+  return "Bill";
 }
 
 function getNextDocumentNumber(documentType = "Bill") {
   if (documentType === "Proforma Invoice") {
     return `PI-${String(state.proformaCounter).padStart(4, "0")}`;
+  }
+  if (documentType === "Purchase Bill") {
+    return `PB-${String(state.purchaseCounter).padStart(4, "0")}`;
   }
   return `AE-${String(state.nextInvoiceCounter).padStart(4, "0")}`;
 }
@@ -2235,6 +2340,11 @@ function getNextDocumentNumber(documentType = "Bill") {
 async function incrementDocumentCounter(documentType = "Bill") {
   if (documentType === "Proforma Invoice") {
     state.proformaCounter += 1;
+    await saveUserCounters();
+    return;
+  }
+  if (documentType === "Purchase Bill") {
+    state.purchaseCounter += 1;
     await saveUserCounters();
     return;
   }
@@ -2313,6 +2423,12 @@ async function migrateLegacyData() {
     const legacyProformaCounter = Number(localStorage.getItem(PROFORMA_COUNTER_KEY) || 1);
     await setMetaValue("proformaCounter", legacyProformaCounter);
   }
+
+  const existingPurchaseCounter = await getMetaValue("purchaseCounter", null);
+  if (existingPurchaseCounter === null) {
+    const legacyPurchaseCounter = Number(localStorage.getItem(PURCHASE_COUNTER_KEY) || 1);
+    await setMetaValue("purchaseCounter", legacyPurchaseCounter);
+  }
 }
 
 function createBackupPayload() {
@@ -2328,7 +2444,8 @@ function createBackupPayload() {
     businessProfile: state.businessProfile,
     meta: {
       invoiceCounter: state.nextInvoiceCounter,
-      proformaCounter: state.proformaCounter
+      proformaCounter: state.proformaCounter,
+      purchaseCounter: state.purchaseCounter
     }
   };
 }
@@ -2344,7 +2461,8 @@ function validateBackupPayload(payload) {
 
   const invoiceCounter = Number(payload.meta?.invoiceCounter);
   const proformaCounter = Number(payload.meta?.proformaCounter);
-  if (!Number.isFinite(invoiceCounter) || !Number.isFinite(proformaCounter)) {
+  const purchaseCounter = Number(payload.meta?.purchaseCounter ?? 1);
+  if (!Number.isFinite(invoiceCounter) || !Number.isFinite(proformaCounter) || !Number.isFinite(purchaseCounter)) {
     throw new Error("Backup counters are invalid.");
   }
 
@@ -2355,7 +2473,8 @@ function validateBackupPayload(payload) {
     businessProfile: normalizeBusinessProfile(payload.businessProfile),
     meta: {
       invoiceCounter: invoiceCounter > 0 ? invoiceCounter : 1,
-      proformaCounter: proformaCounter > 0 ? proformaCounter : 1
+      proformaCounter: proformaCounter > 0 ? proformaCounter : 1,
+      purchaseCounter: purchaseCounter > 0 ? purchaseCounter : 1
     }
   };
 }
@@ -2439,13 +2558,27 @@ function findItemByName(name) {
   return state.items.find((item) => item.name.trim().toLowerCase() === normalizedName) || null;
 }
 
+function getPurchasedQuantity(itemName) {
+  const normalizedName = String(itemName || "").trim().toLowerCase();
+  if (!normalizedName) {
+    return 0;
+  }
+
+  return getPurchaseDocuments().reduce((sum, invoice) => (
+    sum + (invoice.items || []).reduce((itemSum, item) => {
+      const matches = item.description?.trim().toLowerCase() === normalizedName;
+      return itemSum + (matches ? Number(item.quantity || 0) : 0);
+    }, 0)
+  ), 0);
+}
+
 function getSoldQuantity(itemName) {
   const normalizedName = String(itemName || "").trim().toLowerCase();
   if (!normalizedName) {
     return 0;
   }
 
-  return state.invoices.reduce((sum, invoice) => (
+  return getSalesDocuments().reduce((sum, invoice) => (
     sum + (invoice.items || []).reduce((itemSum, item) => {
       const matches = item.description?.trim().toLowerCase() === normalizedName;
       return itemSum + (matches ? Number(item.quantity || 0) : 0);
@@ -2500,3 +2633,23 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
+
+
+
+
+
+
+
+
+
+function isPurchaseDocument(invoice) {
+  return invoice?.documentType === "Purchase Bill";
+}
+
+function getPurchaseDocuments() {
+  return state.invoices.filter(isPurchaseDocument);
+}
+
+function getSalesDocuments() {
+  return state.invoices.filter((invoice) => !isPurchaseDocument(invoice));
+}
