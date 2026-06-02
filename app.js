@@ -105,11 +105,13 @@ const elements = {
   createFromDashboard: document.getElementById("createFromDashboard"),
   createFromList: document.getElementById("createFromList"),
   createPurchaseFromList: document.getElementById("createPurchaseFromList"),
+  createProformaFromList: document.getElementById("createProformaFromList"),
   recentInvoices: document.getElementById("recentInvoices"),
   itemStoreTable: document.getElementById("itemStoreTable"),
   itemSummaryTable: document.getElementById("itemSummaryTable"),
   allInvoicesTable: document.getElementById("allInvoicesTable"),
   purchaseBillsTable: document.getElementById("purchaseBillsTable"),
+  proformaInvoicesTable: document.getElementById("proformaInvoicesTable"),
   invoicePreview: document.getElementById("invoicePreview"),
   totalBilled: document.getElementById("totalBilled"),
   totalBillAmount: document.getElementById("totalBillAmount"),
@@ -203,6 +205,7 @@ function initializeBillingApp() {
     renderItemStore();
     renderInvoicesTable();
     renderPurchaseBillsTable();
+    renderProformaInvoicesTable();
     renderPreview(createDraftFromForm());
     return;
   }
@@ -219,6 +222,7 @@ function initializeBillingApp() {
   renderItemStore();
   renderInvoicesTable();
   renderPurchaseBillsTable();
+  renderProformaInvoicesTable();
   renderPreview(createDraftFromForm());
   state.appReady = true;
 }
@@ -566,6 +570,7 @@ async function handleSaveItem(event) {
     renderDashboard();
     renderInvoicesTable();
     renderPurchaseBillsTable();
+    renderProformaInvoicesTable();
     updateTotals();
   } catch (error) {
     console.error("Failed to save item.", error);
@@ -626,6 +631,7 @@ async function handleImportBackup(event) {
     renderItemStore();
     renderInvoicesTable();
     renderPurchaseBillsTable();
+    renderProformaInvoicesTable();
     renderPreview(createDraftFromForm());
     elements.backupMessage.textContent = `Backup imported from ${file.name}.`;
   } catch (error) {
@@ -779,6 +785,10 @@ function bindFormActions() {
   elements.createPurchaseFromList?.addEventListener("click", () => {
     resetForm("Purchase Bill");
     switchTab("purchase-bill");
+  });
+  elements.createProformaFromList?.addEventListener("click", () => {
+    resetForm("Proforma Invoice");
+    switchTab("new-invoice");
   });
 
   ["input", "change"].forEach((eventName) => {
@@ -1042,10 +1052,11 @@ async function handleSaveInvoice(event) {
     renderDashboard();
     renderInvoicesTable();
     renderPurchaseBillsTable();
+    renderProformaInvoicesTable();
     renderPreview(savedInvoice);
     window.alert(`${getDocumentLabel(savedInvoice.documentType)} ${savedInvoice.invoiceNumber} saved successfully.`);
     resetForm(savedInvoice.documentType === "Purchase Bill" ? "Purchase Bill" : "Bill");
-    switchTab(savedInvoice.documentType === "Purchase Bill" ? "purchase-bills" : "all-invoices");
+    switchTab(getDocumentRegisterTab(savedInvoice.documentType));
   } catch (error) {
     console.error("Failed to save invoice.", error);
     window.alert(`Failed to save document. ${error.message || "Please try again."}`);
@@ -1157,7 +1168,7 @@ function renderDashboard() {
 
   const recent = salesInvoices.slice(0, 5);
   if (!recent.length) {
-    elements.recentInvoices.innerHTML = `<div class="empty-state">No sales documents yet. Create a bill or proforma invoice from the New Bill tab.</div>`;
+    elements.recentInvoices.innerHTML = `<div class="empty-state">No sales bills yet. Create a sales bill from the New Bill tab.</div>`;
   } else {
     elements.recentInvoices.innerHTML = createInvoicesTableMarkup(recent, false);
     bindInvoiceTableActions(elements.recentInvoices);
@@ -1168,12 +1179,23 @@ function renderDashboard() {
 function renderInvoicesTable() {
   const salesInvoices = getSalesDocuments();
   if (!salesInvoices.length) {
-    elements.allInvoicesTable.innerHTML = `<div class="empty-state">No saved invoice documents yet.</div>`;
+    elements.allInvoicesTable.innerHTML = `<div class="empty-state">No saved sales bills yet.</div>`;
     return;
   }
 
   elements.allInvoicesTable.innerHTML = createInvoicesTableMarkup(salesInvoices, true, "Client");
   bindInvoiceTableActions(elements.allInvoicesTable);
+}
+
+function renderProformaInvoicesTable() {
+  const proformaInvoices = getProformaDocuments();
+  if (!proformaInvoices.length) {
+    elements.proformaInvoicesTable.innerHTML = `<div class="empty-state">No saved proforma invoices yet.</div>`;
+    return;
+  }
+
+  elements.proformaInvoicesTable.innerHTML = createInvoicesTableMarkup(proformaInvoices, true, "Client");
+  bindInvoiceTableActions(elements.proformaInvoicesTable);
 }
 
 function renderPurchaseBillsTable() {
@@ -1281,6 +1303,7 @@ async function rotateStatus(id) {
     renderDashboard();
     renderInvoicesTable();
     renderPurchaseBillsTable();
+    renderProformaInvoicesTable();
   } catch (error) {
     console.error("Failed to update invoice status.", error);
     window.alert(`Failed to update invoice status. ${error.message || "Please try again."}`);
@@ -1299,6 +1322,7 @@ async function deleteInvoice(id) {
     renderDashboard();
     renderInvoicesTable();
     renderPurchaseBillsTable();
+    renderProformaInvoicesTable();
   } catch (error) {
     console.error("Failed to delete invoice.", error);
     window.alert(`Failed to delete invoice. ${error.message || "Please try again."}`);
@@ -2646,10 +2670,29 @@ function isPurchaseDocument(invoice) {
   return invoice?.documentType === "Purchase Bill";
 }
 
+function isProformaDocument(invoice) {
+  return invoice?.documentType === "Proforma Invoice";
+}
+
 function getPurchaseDocuments() {
   return state.invoices.filter(isPurchaseDocument);
 }
 
-function getSalesDocuments() {
-  return state.invoices.filter((invoice) => !isPurchaseDocument(invoice));
+function getProformaDocuments() {
+  return state.invoices.filter(isProformaDocument);
 }
+
+function getSalesDocuments() {
+  return state.invoices.filter((invoice) => !isPurchaseDocument(invoice) && !isProformaDocument(invoice));
+}
+
+function getDocumentRegisterTab(documentType = "Bill") {
+  if (documentType === "Purchase Bill") {
+    return "purchase-bills";
+  }
+  if (documentType === "Proforma Invoice") {
+    return "proforma-invoices";
+  }
+  return "sales-bills";
+}
+

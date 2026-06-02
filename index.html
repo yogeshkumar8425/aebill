@@ -85,8 +85,9 @@
       <button class="tab-button" data-tab="item-store">Item Store</button>
       <button class="tab-button" data-tab="new-invoice">New Bill</button>
       <button class="tab-button" data-tab="purchase-bill">Purchase Bill</button>
-      <button class="tab-button" data-tab="all-invoices">All Bills</button>
+      <button class="tab-button" data-tab="sales-bills">Sales Bills</button>
       <button class="tab-button" data-tab="purchase-bills">Purchase Bills</button>
+      <button class="tab-button" data-tab="proforma-invoices">Proforma Invoices</button>
       <button class="tab-button" data-tab="preview">Preview</button>
     </nav>
 
@@ -322,14 +323,14 @@
         </div>
       </section>
 
-      <section id="all-invoices" class="tab-panel">
+      <section id="sales-bills" class="tab-panel">
         <div class="panel">
           <div class="section-heading">
             <div>
-              <p class="section-kicker">Document Register</p>
-              <h3>All Saved Documents</h3>
+              <p class="section-kicker">Sales Register</p>
+              <h3>Saved Sales Bills</h3>
             </div>
-            <button class="secondary-button" id="createFromList">Create Document</button>
+            <button class="secondary-button" id="createFromList">Create Sales Bill</button>
           </div>
           <div id="allInvoicesTable" class="table-wrap"></div>
         </div>
@@ -345,6 +346,19 @@
             <button class="secondary-button" id="createPurchaseFromList">Create Purchase Bill</button>
           </div>
           <div id="purchaseBillsTable" class="table-wrap"></div>
+        </div>
+      </section>
+
+      <section id="proforma-invoices" class="tab-panel">
+        <div class="panel">
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">Proforma Register</p>
+              <h3>Saved Proforma Invoices</h3>
+            </div>
+            <button class="secondary-button" id="createProformaFromList">Create Proforma Invoice</button>
+          </div>
+          <div id="proformaInvoicesTable" class="table-wrap"></div>
         </div>
       </section>
 
